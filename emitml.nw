@@ -1,0 +1,387 @@
+\section{Emitting ML code}
+<<*>>=
+procedure ML(what)
+  return case(what) of {
+    "emit"           : MLEmitnt
+    "preamble"       : MLEmitPreamble
+    "postamble"      : MLEmitPostamble
+    "stringdef"      : MLStringdef
+    "infersemantics" : MLSemantics
+    "precedence"     : MLPrec
+    "lr"             : MLLR
+    "append"	     : MLAppend
+    "nil"	     : "[]"
+    "some"	     : MLSome
+    "none"	     : "NONE"
+    "resynch"        : MLResynch
+    default : error("ML doesn't support ", what)
+  }
+end
+<<*>>=
+procedure MLResynch(pos)
+  return write("(*#line ", pos.lineno, " ", image(pos.filename), "*)")
+end
+<<*>>=
+procedure MLEmitPreamble(g)
+  <<emit [[ii.tab.sml]] file>>
+every write(
+"structure Parser = struct" |
+"  datatype 'a stream = STREAM of unit -> 'a * 'a stream" |
+"  fun invoke (STREAM lex) = lex()" |
+"  " |
+"  type token = Token.token" |
+"  " |
+"  exception SyntaxError of {parsing:string, msg:string list, found:token}" |
+"  exception Expected of {expected:string, found:token, parsing:string option} " |
+"	   (* token expected, nonterminal being parsed *)" |
+"  exception PrematureEOF " |
+"  ")
+ if \g.attributes["arg-pat"] then {
+   writes("fun mk_parser (")
+   every write(!g.attributes["arg-pat"])
+   write(") =")
+ } else
+   write("val parser =")
+every write(
+"let" |
+"  open Token" |
+"  " |
+"  exception TokenMismatch of string" |
+"  fun expect (f, token, lex, nt) =" |
+"    (f token, invoke lex) handle TokenMismatch t => " |
+"         raise Expected {expected=t, found=token, parsing=nt}" |
+"  " |
+"  fun synerror (t, nt, s) = raise SyntaxError {parsing=nt, found=t, msg=s}" |
+"  " |
+"  " |
+"  (* closure and optional for parsing *)" |
+"  fun closure((token, lex), predicate, parse) =" |
+"    let fun cl(token, lex, l) =" |
+"	   if predicate token then" |
+"	     let val (x, (token, lex)) = parse(token, lex)" |
+"	     in  cl(token, lex, x::l)" |
+"	     end" |
+"	   else" |
+"	     (rev l, (token, lex))" |
+"    in  cl(token, lex, [])" |
+"    end" |
+"  " |
+"  fun optional((token, lex), predicate, parse) = " |
+"     if predicate token then " |
+"	let val (x, (token, lex)) = parse(token, lex)" |
+"	in  (SOME x, (token, lex))" |
+"	end" |
+"     else " |
+"	(NONE, (token, lex))" |
+"  " |
+"  fun make_parser (f, unEOF) stream =" |
+"    let val (result, (token, lex)) = f (invoke stream)" |
+"    in  (unEOF token; result) handle TokenMismatch _ => raise PrematureEOF" |
+"    end" |
+"  " |
+"")
+  default_emit_preamble(g, ML)
+  write()
+  <<emit ``untoken'' functions>>
+  return
+end
+
+procedure MLEmitPostamble(g)
+  default_emit_postamble(g, ML)
+  write("in")
+  write("  make_parser(P_", g.start, ", unEOF)")
+  write("end (*parser or mk_parser*)")
+  write("end (* Parser *)")
+  return
+end
+<<*>>=
+global ITAB, thisnt
+procedure MLEmitnt(g, nt)
+  local outfile
+  static fun
+  initial {
+    ITAB := 4
+    fun := "fun"
+  }
+  write(fun, " P_", thisnt := nt, "(token, lex) =")
+  fun := "and"
+  write(if type(g.nonterms[nt]) ~== "Alt" then 
+              " # " || prodimage(nt[1], g.nonterms[nt]) else "")
+  MLEmitnode(g, g.nonterms[nt], ITAB)
+end
+<<emit [[ii.tab.sml]] file>>=
+outfile := open("ii.tab.sml", "w") | stop("can't open ii.tab.sml")
+write(outfile, "signature TOKEN = sig")
+emit_ml_token_datatype(outfile, g)
+write(outfile, "val reserved : string -> token option")
+write(outfile, "end")
+
+write(outfile, "structure Token : TOKEN = struct")
+emit_ml_tokendef(outfile, g)
+emit_ml_reserved(outfile, g)
+write(outfile, "end")
+close(outfile)
+@ 
+<<emit ``untoken'' functions>>=
+write("(*#line ", 0, " ", image("generated code"), "*)")
+l := sort(g.leaves)
+every t := !l & member(g.terms, t) do {
+  if /g.termtypes[t] then { pat := g.terms[t]; val := t }    
+  else                    { pat := "(" || g.terms[t] || " x)"; val := "x" }
+  write("  fun un", g.terms[t], " ", pat, " = ", val)
+  write("    | un", g.terms[t], " _ = raise TokenMismatch ", image(t))
+}    
+write("  fun unEOF EOF = \"end of file\"")
+write("    | unEOF _ = raise TokenMismatch \"end of file\"")
+write()
+@
+<<*>>=
+procedure MLEmitnode(g, node, indent, assignment)
+  local initindent, ofword
+  static fakeline
+  initial {fakeline := create(seq(1000, 1000))
+          }
+  if type(node) ~== "Alt" then iwrites(indent, \assignment, " ")
+  initindent := if /assignment then indent else 0
+  case type(node) of {
+    "Alt" : {
+        iwrite(indent, assignment, "let")
+        every i := 1 to *node.list & n := node.list[i] do {
+          iwrites(indent+ITAB, "fun alt", i, " () = ")
+          write("(* ", 
+                if g.nonterms[l := key(g.nonterms)] === node then prodimage(l, n) 
+                else nodeimage(n), " *)")
+          MLEmitnode(g, n, indent+2*ITAB, assignment)
+        }
+        iwrite(indent, assignment, "in")
+        iwrite(indent+ITAB, assignment, "case token")
+        ofword := "of"
+        every i := 1 to *node.list & n := node.list[i] & 
+              t := ml_token_pat(g, !sort(predict(n, node)))
+        do {
+          iwrite(indent+2*ITAB, ofword, " ", t, " => alt", i, "()")
+          ofword := " |"
+        }          
+        iwrite(indent+2*ITAB, ofword, " t => ", mlsyntax(node, "t"))
+        iwrite(indent, "end")
+      }
+    "Cat" : {
+        iwrite(indent, "let")
+        every MLEmitnode(g, node.list[i := 1 to *node.list], indent + ITAB,
+                           "val (ii" || i || ", (token, lex)) = ")
+
+        iwrite(indent+ITAB, "val result = (")
+        write("(*#line ", adjustline(\node.position), "*)")
+        every iwrite(indent+ITAB, !\node.semantics)
+        write("(*#line ", \node.position & @fakeline, image("generated code"), "*)")
+        iwrite(indent+ITAB, ")")
+        iwrite(indent, "in  (result, (token, lex))")
+        iwrite(indent, "end")
+        }
+    "Opt" | "Clo" : {
+      f := if type(node) == "Opt" then "optional" else "closure"
+      iwrite(initindent, "(", f, "((token, lex), (")
+      fn := "fn"
+      every t := ml_token_pat(g, !sort(first[node]--epsilonset)) do {
+        iwrite(indent+ITAB, fn, " ", t, " => true")
+        fn := " |"
+      }
+      iwrite(indent+ITAB, fn, " _ => false),")
+      iwrite(indent, "(fn (token, lex) => ")
+      MLEmitnode(g, node.node, indent+2*ITAB)
+      iwrite(indent+ITAB, ")))")
+    }
+    "string" : 
+       iwrite(initindent, "expect(un", \g.terms[node], ", token, lex, ",
+                                  "SOME ", image(thisnt), ")") | 
+         iwrite(initindent, "P_", node, "(token, lex)")
+    default : error("this can't happen -- error node type")
+  }
+  return
+end
+@
+Print different syntax error messages according to the number of alternatives.
+<<*>>=
+link commafy
+procedure mlsyntax(alt, token)
+  s := set()
+  every s ++:= predict(!alt.list, alt)
+  return case *s of {
+    0 : error("Empty predict set in production for `", thisnt, "'! Can this happen?")
+    1 | 2 | 3 :
+       map("synerror(" || token || ", #" || thisnt || "#, [#expected " || 
+           map(commafy(sort(s), "or"), "\"", "'") || "#])", "#", "\"")
+    default : map("synerror(" || token || ", #" || thisnt || "#, [])", "#", "\"")
+  }
+end
+@
+[[iwrite]] and [[iwrites]] are used for indentation.
+@
+Define nonterminals
+<<*>>=
+global MLReserved
+
+procedure MLStringdef(g)
+  MLReserved := set()
+  every t := !g.leaves & not member(g.nonterms, t) do
+    if any('"\'', t[1] == t[-1]) then {
+      /g.terms[t] := mltokname(t[2:-1])
+      insert(MLReserved, t)
+    }
+  every t := key(g.terms) do /g.terms[t] := t
+  return g
+end
+<<*>>=
+procedure emit_ml_reserved(outfile, g)
+  local prefix, nprefix
+  prefix  := "fun reserved "
+  nprefix := "  | reserved "
+  every t := !sort(MLReserved) do {
+    write(outfile, prefix, t, " = SOME ", g.terms[t])
+    prefix := nprefix
+  }    
+  write(outfile, nprefix, " _ = NONE")
+  write(outfile)
+  return g
+end
+<<*>>=
+procedure MLSemantics(g)
+  every MLdosem(g, !g.nonterms)
+  return
+end
+
+procedure MLdosem(g, node)
+  case type(node) of {
+    "Opt" | "Clo" : MLdosem(g, node.node)
+    "Alt" : every MLdosem(g, !node.list)
+    "Cat" : {
+       every MLdosem(g, !node.list)
+       node.semantics := [case type(node.semantics) of {
+         "null" : {
+            "ii" || copy_number(g, node) | {
+              s := "["
+              every s ||:= "ii" || (1 to *node.list) || ", "
+              s[1:-2] || "]" | "NONE"
+            }
+          }
+         "string" : MLSemanticTag(g, node, node.semantics)
+         "allargs" : node.semantics.ident || "(" ||
+                      arg_list("ii", {l := []; every put(l, 1 to *node.list); l}) || ")"
+       }]
+     }
+    "string" : &fail
+    default  : error("impossible node type")
+  }
+end
+<<*>>=
+procedure MLSemanticTag(g, catnode, ident)
+  return ident || "(" || arg_list("ii", arg_numbers(g, catnode)) || ")"
+end
+@
+<<*>>=
+procedure MLPrec(g)
+  local fun
+  fun := "fun"
+  every p := !sort(g.prec, 2) & term := p[1] do {
+    write(fun, " prec ", term, " = ", p[2]) 
+    fun  := "  |"
+  }
+  write(fun, " prec _ = raise Prec")
+  fun := "fun"
+  every p := !sort(g.prec, 2) & term := p[1] do {
+    write(fun, " assoc ", term, " = ", image(g.assoc[p[1]]))
+    fun  := "  |"
+  }
+  write(fun, " assoc _ = raise Prec")
+  return
+end
+<<*>>=
+procedure MLAppend(list, x)
+  return "(" || list || "@ [" || x || "])"
+end
+
+procedure MLSome(l, n)
+  case *\l of {
+      0 : fail
+      1 : l[1] := "SOME (" || l[1] || ")"
+      default : { push(l, "SOME ("); put(l, ")")
+                  n.position := n.position ?
+                    if l := tab(upto(' ')) then (l-1) || tab(0) 
+                }
+  }
+  return \l
+end
+<<*>>=
+procedure emit_ml_tokendef(outfile, g)
+  local prefix, arg, val
+  emit_ml_token_datatype(outfile, g)
+###  write(outfile, "exception TokenMismatch of string")
+  write(outfile)
+end
+<<*>>=
+procedure emit_ml_token_datatype(outfile, g)
+  local prefix
+  l := sort(g.leaves)
+  write (outfile, "datatype token = EOF")
+  prefix :=       "               | "
+  every t := !l & member(g.terms, t) do
+    write(outfile, prefix, g.terms[t], 
+          if /g.termtypes[t] then "" else " of " || g.termtypes[t])
+  write(outfile)
+  return
+end
+<<*>>=
+procedure ml_token_pat(g, t)
+  return if /g.termtypes[t] then g.terms[t] else "(" || g.terms[t] || " _)"
+end
+<<mlfuns.t>>=
+(* set functions *)
+type 'a set = 'a list
+val emptyset : 'a set = []
+fun member(x, [])   = false
+  | member(x, h::t) = x = h orelse member(x, t)
+fun insert(x, l) = if member(x, l) then l else x::l
+fun delete(x, [])   = []
+  | delete(x, h::t) = if x = h then t else h :: delete(x, t)
+
+(* lexing *)
+
+datatype 'a stream = STREAM of unit -> 'a * 'a stream
+fun invoke (STREAM lex) = lex()
+
+exception TokenMismatch of string
+exception Expected of string * string option 
+	(* token expected, nonterminal being parsed *)
+
+fun expect (f, token, lex, nt) =
+  (f token, invoke lex) handle TokenMismatch t => raise Expected(t, nt)
+
+exception SyntaxError of string
+fun synerror s = raise SyntaxError s
+
+
+(* closure and optional for parsing *)
+fun closure((token, lex), predicate, parse) =
+  let fun cl(token, lex, l) =
+        if predicate token then
+          let val (x, (token, lex)) = parse(token, lex)
+          in  cl(token, lex, x::l)
+          end
+        else
+          (rev l, (token, lex))
+  in  cl(token, lex, [])
+  end
+
+fun optional((token, lex), predicate, parse) = 
+   if predicate token then 
+     let val (x, (token, lex)) = parse(token, lex)
+     in  (SOME x, (token, lex))
+     end
+   else 
+     (NONE, (token, lex))
+
+exception PrematureEOF 
+fun make_parser (f, unEOF) stream =
+  let val (result, (token, lex)) = f (invoke stream)
+  in  (unEOF token; result) handle TokenMismatch _ => raise PrematureEOF
+  end

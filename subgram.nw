@@ -1,0 +1,38 @@
+Return a subgrammar rooted at nonterminal nt.
+<<*>>=
+procedure subgrammar(g, start, endsyntax)
+  local new
+  new := copy(g)
+  new.start := start
+  every new.terms | new.nonterms := table()
+  new.ntlist := []
+  new.leaves := set()
+  markreachable(new.leaves, g, start)
+  every member(new.leaves, nt := !g.ntlist) do {
+    put(new.ntlist, nt)
+    new.nonterms[nt] := g.nonterms[nt]
+  }
+  every member(new.leaves, t := key(g.terms)) do {
+    new.terms[t] := g.terms[t]
+  }
+  new.endsyntax := \endsyntax
+  return new
+end
+<<*>>=
+procedure markreachable(reachable, g, nt)
+  if member(reachable, nt) then return
+  insert(reachable, nt)
+  domarkreachable(reachable, g, \g.nonterms[nt])
+  return
+end
+<<*>>=
+procedure domarkreachable(reachable, g, node)
+  case type(node) of {
+    "Opt" | "Clo" : domarkreachable(reachable, g, node.node)
+    "Alt" : every domarkreachable(reachable, g, !node.list)
+    "Cat" : every domarkreachable(reachable, g, !node.list  | \node.precterm)
+    "string" : markreachable(reachable, g, node)
+    default  : error("impossible node type ", type(node))
+  }
+  return
+end

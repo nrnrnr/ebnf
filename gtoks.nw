@@ -1,7 +1,7 @@
 <<*>>=
 global SEMANTICS, IDENT, STARTSEM, ENDSEM
 procedure scantokens(eol)
-  static alphanum, semantics, semmatch
+  static alphanum, semantics, semmatch, multichar
   initial { 
     alphanum := &letters ++ &digits ++ '_'
     SEMANTICS := " semantics "
@@ -11,6 +11,7 @@ procedure scantokens(eol)
     semmatch := table()
     semmatch["/."] := "./"
     semmatch["/*"] := "*/"
+       multichar := ["$$"]
   }
   if \eol then fail
   if /semantics then {
@@ -30,6 +31,8 @@ procedure scantokens(eol)
       move(1)
     } else if pos(1) & tval := ="%%" & pos(0) then {
       token := "%%"
+    } else if tval := =!multichar then {
+      token := tval
     } else {
       token := tval := move(1)
     }

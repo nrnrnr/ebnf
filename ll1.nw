@@ -2,7 +2,7 @@
 <<*>>=
 global epsilon, epsilonset, endmarker, debugging, emitnt
 
-procedure ll1(g, argv, emit)
+procedure ll1(g, argv, emitter)
   epsilon     := " %Epsilon% "
   endmarker   := "end of file"
   epsilonset  := set([epsilon])
@@ -22,9 +22,27 @@ procedure ll1(g, argv, emit)
   compute_follow(g)
   if \debugging then { emitff(&errout, g); emitpredict(g) }
   showconflicts(g)
-  every write(!g.preamble)
-  emitcode(g, ntlist, emit)
-  every write(!g.postamble)
+  emitter("preamble")(g)
+  emitcode(g, ntlist, emitter("emit"))
+  emitter("postamble")(g)
+end
+@ 
+<<*>>=
+procedure emit_amble(amble, synch)
+  every l := !amble do case type(l) of {
+    "string" : write(l)
+    "resynch" : synch(l)
+    default : impossible("type of ", type(l), " in preamble or postanble")
+  }
+  return
+end
+
+procedure default_emit_preamble(g, emitter)
+  return emit_amble(g.preamble, (\emitter)("resynch") | default_resynch)
+end
+
+procedure default_emit_postamble(g, emitter)
+  return emit_amble(g.postamble, (\emitter)("resynch") | default_resynch)
 end
 @
 \subsection{First and follow sets}
@@ -190,13 +208,14 @@ end
 @
 <<*>>=
 procedure conflicts(node, lhs)
+  local ambiguous
   n := 0
   case type(node) of {
     "Alt" : {
       p := []
       every put(p, predict(!node.list, node))
-      if *(p[i := 1 to *p] ** p[j := i+1 to *p]) > 0 & n +:= 1 then
-        write(&errout, lhs, ": can't predict alternatives among ", nodeimage(node))
+      if *(ambiguous := p[i := 1 to *p] ** p[j := i+1 to *p]) > 0 & n +:= 1 then 
+        {<<report inability to predict alternative>>}
       every n +:= conflicts(!node.list, lhs)
     }
     "Opt" | "Clo" : {
@@ -210,3 +229,11 @@ procedure conflicts(node, lhs)
   }
   return n
 end
+<<report inability to predict alternative>>=
+write(&errout, lhs, ": can't predict alternatives")
+write(&errout, lhs, ": ambiguous tokens are:")
+every write(&errout, repl(" ", *lhs), "     ", !ambiguous)
+write(&errout, lhs, ": and they appear in")
+every q := !node.list & member(predict(q, node), !ambiguous) do
+  write(&errout, repl(" ", *lhs), "    ", nodeimage(q))
+@ 

@@ -1,0 +1,88 @@
+Produce names for tokens
+<<*>>=
+procedure charname(s)
+  static nametab
+  local c
+  initial {
+    nametab := table()
+    <<initialization>>
+    nametab[":="] := "GETS"  
+    nametab["<="] := "LE"  
+    nametab[">="] := "GE"
+    nametab["=>"] := "DARROW"
+    nametab["->"] := "ARROW"
+    nametab[""] := "EMPTY"
+    every c := !(&letters ++ &digits ++ '_') do nametab[c] := c
+  }
+  if \nametab[s] then return nametab[s]
+  if /nametab[!s] then fail
+  r := ""
+  every r ||:= "_" || nametab[!s]
+  return r[2:0]
+end
+<<initialization>>=
+nametab["\x00"] := "NUL"  
+nametab["\x01"] := "SOH"  
+nametab["\x02"] := "STX"  
+nametab["\x03"] := "ETX"  
+nametab["\x04"] := "EOT"  
+nametab["\x05"] := "ENQ"  
+nametab["\x06"] := "ACK"  
+nametab["\x07"] := "BEL"  
+nametab["\b"  ] := "BS"   
+nametab["\t"  ] := "HT"   
+nametab["\n"  ] := "LF"   
+nametab["\v"  ] := "VT"   
+nametab["\f"  ] := "FF"   
+nametab["\r"  ] := "CR"   
+nametab["\x0e"] := "SO"   
+nametab["\x0f"] := "SI"   
+nametab["\x10"] := "DLE"  
+nametab["\x11"] := "DC1"  
+nametab["\x12"] := "DC2"  
+nametab["\x13"] := "DC3"  
+nametab["\x14"] := "DC4"  
+nametab["\x15"] := "NAK"  
+nametab["\x16"] := "SYN"  
+nametab["\x17"] := "ETB"  
+nametab["\x18"] := "CAN"  
+nametab["\x19"] := "EM"   
+nametab["\x1a"] := "SUB"  
+nametab["\e"  ] := "ESC"  
+nametab["\x1c"] := "FS"   
+nametab["\x1d"] := "GS"   
+nametab["\x1e"] := "RS"   
+nametab["\x1f"] := "US"   
+nametab[" "   ] := "SPACE"
+nametab["!" ] := "BANG"
+nametab["\""] := "DBLQ"
+nametab["#" ] := "SHARP"
+nametab["$" ] := "DOL"
+nametab["%" ] := "PERC"
+nametab["&" ] := "AMP"
+nametab["'" ] := "TICK"
+nametab["(" ] := "LPAR"
+nametab[")" ] := "RPAR"
+nametab["*" ] := "STAR"
+nametab["+" ] := "PLUS"
+nametab["," ] := "COMMA"
+nametab["-" ] := "DASH"
+nametab["." ] := "DOT"
+nametab["/" ] := "SLASH"
+nametab[":" ] := "COLON"
+nametab[";" ] := "SEMI"
+nametab["<" ] := "LT"
+nametab["=" ] := "EQ"
+nametab[">" ] := "GT"
+nametab["?" ] := "QUES"
+nametab["@" ] := "AT"
+nametab["[" ] := "LSQ"
+nametab["\\"] := "BSLA"
+nametab["]" ] := "RSQ"
+nametab["^" ] := "HAT"
+nametab["`" ] := "BTICK"
+nametab["{" ] := "LBR"
+nametab["|" ] := "BAR"
+nametab["}" ] := "RBR"
+nametab["~" ] := "TILDE"
+nametab["\d"] := "DEL"

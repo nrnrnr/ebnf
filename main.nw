@@ -5,17 +5,23 @@ procedure main(args)
   opts := []
   emitter := Icon
   while case args[1] of {
+    "-impossible" : error := impossible
     "-d"       : put(opts, args[1])
     "-flatten" : flatten := args[1]
     "-slr"     : dolr := slr1
     "-lr1"     : lr1 := args[1]
     "-parser"  : doparser  := args[1]
     "-grammar" : dogrammar := args[1]
+    "-infer"   : doinfer := args[1]
     "-prec"    : showprec := args[1]
+    "-infer"   : infer := args[1]
     "-icn" : emitter := Icon
     "-c"   : emitter := C
+    "-ml"  : emitter := ML
+    "-start" : {get(args); substart := args[1]}
     "-yacc" : yacc := args[1]
-    default : if args[1][1] == "-" then stop("Unrecognized argument ", args[1])
+    "-mlyacc" : yacc := args[1]
+    default : if args[1][1] == "-" then usage()
   } do get(args)
   if /showprec & /doparser & /dogrammar & /dolr then doparser := 1
   case *args of {
@@ -24,20 +30,19 @@ procedure main(args)
                                write(&errout, "Can't open ", filename)
     default : usage()
   }
+  g := subgrammar(g, \substart)
   emitter("stringdef")(g)
   if \flatten then
     flattengrammar(g)
+  if \dolr | \infer | \doparser | \doinfer then
+    emitter("infersemantics")(g)
   if \lr1 | \dolr then
-    lrxform(g)
-  writegrammar(\dogrammar & &output, g, yacc)
-  if \doparser then {
-    emitter("infersemantics")(g)
-    ll1(g, opts ||| args, emitter("emit"))
-  }
-  if \dolr then {
-    emitter("infersemantics")(g)
+    lrxform(g, emitter)
+  writegrammar(\dogrammar & &output, g, yacc, emitter)
+  if \doparser then
+    ll1(g, opts ||| args, emitter)
+  if \dolr then
     dolr(g, opts ||| args, emitter("lr"))
-  }
   if \showprec then
     emitter("precedence")(g)
 end
@@ -45,21 +50,25 @@ end
 procedure usage()
   every write("Usage: ebnf [options] [grammarfile]" |
 "Options:" | 
+"-d	   write debugging info on standard error" |
 "-flatten  flatten grammar -- needed if LL(1) uses semantic actions" |
-"-lalr     emit SLR(1) parser (Icon only)" |
+"-slr      emit SLR(1) parser (Icon only)" |
 "-lr1      remove EBNF constructs & make LR(1) grammar" |
 "-parser   spit an LL(1) recursive descent parser on stdout (default)" |
 "-grammar  rewrite the grammar on stdout (after flattening or yaccifying" |
+"-infer    infer semantics for a rewritten grammar" |
 "-yacc     if emitting grammar, put it in yacc form" |
+"-mlyacc   if emitting grammar, put it in mlyacc form" |
 "-icn      emit Icon (the default)" |
 "-c        emit a C parser" |
+"-ml       emit an ML parser" |
 "" |
 "Useful combinations:" |
 "  New grammars w/o extended BNF:" |
 "    -flatten -grammar" |
 "    -lr1 -grammar" |
 "  Parsers:" |
-"    -lalr" |
+"    -slr" |
 "    -flatten -parser"
 )
   stop()

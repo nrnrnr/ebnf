@@ -1,10 +1,14 @@
 <<*>>=
 global pixsemantics
 
-procedure writegrammar(outfile, g, yacc)
+procedure writegrammar(outfile, g, yacc, emitter)
+  initial pixsemantics := showsemantics
   ps := pixsemantics
   write(outfile, "%start ", g.start)
-  if \yacc then { yacctx(g) ; pixsemantics := set(["{"]) }
+  case yacc of {
+    "-yacc" : { yacctx(g) ; pixsemantics := showyaccsem }
+    "-mlyacc" : { mlyacctx(g) ; pixsemantics := showmlyaccsem }
+  }
   if /yacc then
     every t := key(g.terms) do
       write(outfile, "%term ", t, " " || (t ~== g.terms[t]) | "")
@@ -47,8 +51,8 @@ procedure nodepix(g, node, separator)
        s := ""
        every s ||:= nodepix(g, !node.list, node) || " "
        <<add precedence from [[node]] to [[s]] if needed>>
-       if \node.semantics & /pixsemantics then # frightful cheat
-         s || "/* " || commaseparate(node.semantics, "\n") || " */"
+       if s ||:= pixsemantics(g, node) then
+         s
        else 
          s[1:-1] | ""
      }
@@ -63,11 +67,65 @@ procedure nodepix(g, node, separator)
     default  : error("impossible node type")
   }
 end
+<<*>>=
+procedure showsemantics(g, node, left, right)
+  /left := "/* "
+  /right := " */"
+  return case type(s := node.semantics) of {
+    "list" : left || commaseparate(s, "\n") || right
+    "string" : "$ " || s
+    "allargs" : "$$ " || s
+    "null" : fail
+    default : impossible("type of semantics")
+  }
+end
+<<*>>=
+record allargs(ident)
+
+procedure showyaccsem(g, node)
+  return case type(s := node.semantics) of {
+    "list" : fail
+    "null" :  "{ $0 = $" || copy_number(g, node) || "; }"
+    "string"  : "{ $0 = " || s || "(" || arg_list("$", arg_numbers(g, node)) || "); }"
+    "allargs" : "{ $0 = " || s.ident || "(" || 
+                   arg_list("$", {l := []; every put(l, 1 to *node.list); l}) || "); }"
+    default : impossible("type of semantics")
+  }
+end
+@
+[[arg_numbers]] tells which parts of the right-hand side to use as arguments
+(or as semantics).
+If there's exactly one element, use it; otherwise use the nonterminals.
+<<*>>=
+procedure arg_numbers(g, node)
+  l := []
+  case *node.list of {
+    1 : put(l, 1)
+    default : every put(l, 1(i := 1 to *node.list, not member(g.terms, node.list[i])))
+  }   
+  return l
+end
+@
+In the case where there is exactly one reasonable argument,
+it can be copied by default.
+[[copy_number]] gives its number or fails.
+<<*>>=
+procedure copy_number(g, node)
+  l := arg_numbers(g, node)
+  if *l = 1 then return l[1]
+end
+<<*>>=
+procedure arg_list(prefix, nums)
+  s := ""
+  every s ||:= prefix || !nums || ", "
+  return s[1:-2] | ""
+end
 @
 <<add precedence from [[node]] to [[s]] if needed>>=
 if not (if member(g.terms, lp := node.list[*node.list to 1 by -1]) then
           lp == \node.precterm) then
-  s ||:= "%prec " || g.terms[\node.precterm] || " "
+  s ||:= "%prec " || (\g.terms[\node.precterm] |
+error("null terminal for precterm = ", image(\node.precterm))) || " "
 <<*>>=
 procedure yacctx(g)
   static quote, n
@@ -78,9 +136,39 @@ procedure yacctx(g)
       else g.terms[k] := 
         (g.terms[k] ? {
           move(1)
-          map(tab(many(&letters)), &lcase, &ucase) | @n
+          map(tab(many(&letters)), &lcase, &ucase) | charname(tab(-1)) | @n
         })
   return g
+end
+<<*>>=
+procedure mlyacctx(g)
+  static quote
+  initial quote := "\""
+  every k := key(g.terms) do
+    if g.terms[k][1] == g.terms[k][-1] == quote then 
+      g.terms[k] := mltokname(g.terms[k][2:-1])
+  return g
+end
+
+procedure mltokname(s)
+  static n
+  initial n := create("XXX" || seq())
+  return "R'" || 
+     (s ? (map(tab(many(&letters)), &lcase, &ucase) | charname(tab(0)) | @n))
+end
+@ 
+Only called for cat nodes
+<<*>>=
+procedure showmlyaccsem(g, node)
+  t := table(0)
+  l := ["let"]
+  every i := 1 to *node.list & n := node.list[i] do
+    if type(n) == "string" then {
+      t[n] +:= 1
+      put(l, "  val ii" || i || " = " || if /g.terms[n] then n || t[n] else n)
+    }
+  put (l, "in\n")  
+  return "(" || commaseparate(l, "\n") || showsemantics(g, node, "", "") || "\nend)"
 end
 
           

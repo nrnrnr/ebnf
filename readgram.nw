@@ -16,6 +16,7 @@ introduced as terminals.
 <<*>>=
 record grammar(nonterms, 	# map nonterminal symbol -> right-hand side
                terms, 		# map terminal symbol (name or string) to output syntax
+               termtypes,	# map terminal symbol to type of tval (used in ML)
 	       ntlist, 		# list of nonterminals in order of appearance
 	       start, 		# start symbol
 	       leaves, 		# set of terminals and nonterminals used in productions
@@ -24,7 +25,8 @@ record grammar(nonterms, 	# map nonterminal symbol -> right-hand side
 	       endsyntax,	# syntax for token to follow grammar
                externalnts,	# nonterminals for which external parsers are supplied
                prec,		# precedence of terminals
-               assoc)		# associativity of terminals
+               assoc,		# associativity of terminals
+               attributes)      # arbitrary attributes
 @
 Each production may either be a string (terminal or nonterminal), or a combination 
 of strings using the four operators of EBNF: alternation ([[|]]), closure ([[{...}]]),
@@ -39,63 +41,79 @@ record Cat(list, semantics, precterm, position)
 <<*>>=
 procedure readgrammar(file)
   local lhs, rhs, preamble, postamble, ntlist, leaves, terms, nonterms, endsyntax,
-        prec, assoc, nextprec
+        prec, assoc, nextprec, termtypes, termtype, t, att, attributes
   every preamble | postamble | ntlist := []
   every leaves | externalnts := set()	
-  every terms | nonterms | prec | assoc := table()
+  every terms | termtypes | nonterms | prec | assoc | attributes := table()
   endsyntax := "EOF"
   nextprec := 1
-  <<read [[preamble]] from [[file]], adding to [[terms]]>>
+  <<read [[preamble]] from [[file]], adding to [[terms]] and [[termtypes]]>>
   <<read productions from [[file]], adding to [[nonterms]] and [[leaves]]>>
   while put(postamble, read(file))
-  return grammar(nonterms, terms, ntlist, start, leaves, preamble, postamble, endsyntax,
-                 externalnts, prec, assoc)
+  return grammar(nonterms, terms, termtypes, ntlist, start, leaves, preamble, postamble,
+                 endsyntax, externalnts, prec, assoc, attributes)
 end
 @
-<<read [[preamble]] from [[file]], adding to [[terms]]>>=
+<<read [[preamble]] from [[file]], adding to [[terms]] and [[termtypes]]>>=
 lineno := 0
 while lineno +:= 1 &
   thisline := read(file) ? 
     if ="%%" & pos(0) then
       break
-    else if ="%term " then
-      case *(l := split(tab(0))) of {
-        1 | 2   : {<<add terminal [[l[1]]] with syntax [[l[2] | &null]]>>}
-        default : error("syntax: %term gsyntax [osyntax]")
-      }
-    else if ="%end " then
+    else if (="%term", white()) then {
+      t := tab(upto(' \t') | 0)      
+      <<add terminal [[t]] with default syntax and no type>>
+      termtype := 3(optwhite(), ="(", tab(bal(')')), =")") | &null
+      termtypes[t] := termtype
+      if ="(" then error("syntax: %term gsyntax [(type)] [osyntax]")
+      optwhite()
+      pos(0) | (terms[t] := tab(upto(' \t') | 0))
+      optwhite()
+      pos(0) | error("syntax: %term gsyntax [(type)] [osyntax]")
+    } else if ="%end " then
       endsyntax := tab(0)
     else if ="%start " then
       /start := tab(0) | error("start symbol already set")
     else if ="%external " then
       insert(externalnts, tab(0))
     else if ="#line " then
-      lineno := tab(many(&digits)) - 1 & tab(many(' \t')) &
-          pos(0) | (="\"" & filename := tab(upto('"')) & ="\"" & pos(0))
+      (lineno := tab(many(&digits)) - 1, tab(many(' \t')), 
+         pos(0) | (="\"", filename := tab(upto('"')), ="\"", pos(0)),
+       put(preamble, resynch(filename, lineno))
+      )
     else if ="%" & ass := =("left"|"right"|"nonassoc") & tab(many(' \t')) then
       {<<new precedence class>>}
-    else
+    else if ="%attribute " then {
+      att := tab(upto(' ') | 0)
+      /attributes[att] := []
+      put(attributes[att], tab(0))
+    } else
       put(preamble, tab(0))
-<<add terminal [[l[1]]] with syntax [[l[2] | &null]]>>=
-if member(terms, l[1]) then error(l[1], " is already a terminal symbol")
-if \nonterms[l[1]] then error(l[1], " is already a nonterminal symbol")
-terms[l[1]] := l[2] | &null
+<<add terminal [[t]] with default syntax and no type>>=
+if member(terms, t) then error(t, " is already a terminal symbol")
+if \nonterms[t] then error(t, " is already a nonterminal symbol")
+terms[t] := termtypes[t] := &null
 <<new precedence class>>=
 while case scantokens() of {
   IDENT : {
     if not member(terms, tval) then {
-      l := [tval]; <<add terminal [[l[1]]] with syntax [[l[2] | &null]]>>
+      t := tval; <<add terminal [[t]] with default syntax and no type>>
     }
     prec[tval] := nextprec;
     assoc[tval] := ass;
   }
   "\"" | "'" : {
+    if not member(terms, image(tval)) then {
+      t := image(tval); <<add terminal [[t]] with default syntax and no type>>
+    }
     prec[image(tval)] := nextprec;
     assoc[image(tval)] := ass;
   }
   default : error("identifier or terminal literal expected")
 }
 nextprec +:= 1
+<<*>>=
+record resynch(filename, lineno)
 @
 <<read productions from [[file]], adding to [[nonterms]] and [[leaves]]>>=
 lex(file)
@@ -158,6 +176,11 @@ procedure parsealt(leaves, terms)
                }
                lex()
               }
+       "$" | "$$"  : {
+                ot := token; lex(); s := tval; expect(IDENT)
+                if ot == "$$" then s := allargs(s)
+                return Cat(l, s, precterm, lineno || " " || image(filename))
+               }
        STARTSEM : {<<parse semantics and return [[Cat]] node of [[l]]>>}
        !"]})|;" : return if *l = 1 & /precterm then l[1] 
                          else Cat(l, &null, precterm, lineno || " " || image(filename))
@@ -217,4 +240,12 @@ procedure split(line)
     }
   }
   return l
+end
+<<*>>=
+procedure white()
+  suspend tab(many(' \t'))
+end
+
+procedure optwhite()
+  suspend white() | ""
 end

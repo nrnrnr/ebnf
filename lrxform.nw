@@ -2,28 +2,39 @@
 The idea is to put every right-hand side into the normal form
 [[Alt({Cat({string})})]].
 <<*>>=
-procedure lrxform(g)
+global lrcons, lrnil, lrsome, lrnone
+procedure lrxform(g, emitter)
   work := []
   every lhs := !g.ntlist do
     every put(work, lhs | g.nonterms[lhs])
   g.ntlist := []
-  while lrxpair(g, work, get(work), get(work))
+  while lrxpair(g, work, get(work), get(work), emitter)
   return g
 end
 <<*>>=
-procedure lrxpair(g, work, lhs, node)
+procedure lrxpair(g, work, lhs, node, emitter)
   static epsilon
   initial { epsilon := Cat([]) }
   put(g.ntlist, lhs)
-  return g.nonterms[lhs] := lrxalt(g, work, lhs, node)
+  return g.nonterms[lhs] := lrxalt(g, work, lhs, node, emitter)
 end
 
-procedure lrxalt(g, work, lhs, node)   # produce Alt-Cat-string
-  static missing, empty
-  initial { missing := Cat([], ["&null"]); empty := Cat([], ["[]"]) }
+procedure lrxalt(g, work, lhs, node, emitter)   # produce Alt-Cat-string
+  static missing, empty, append, some # OK since emitter never changes
+  initial { 
+     missing := Cat([], [emitter("none")])
+     empty   := Cat([], [emitter("nil")]) 
+     append := emitter("append")
+     some := emitter("some")
+  }
   return case type(node) of {
-    "Opt"    : lrxalt(g, work, lhs, Alt([node.node, missing]))
-    "Clo"    : lrxalt(g, work, lhs, Alt([Cat([lhs, node.node],["put(ii1, ii2)"]), empty]))
+    "Opt"    : {
+       n := lrxcat(g, work, lhs, node.node) # Cat-string
+       n.semantics := some(\n.semantics, n)
+       Alt([n, missing])
+    }
+    "Clo"    : lrxalt(g, work, lhs, Alt([Cat([lhs, node.node],[append("ii1", "ii2")]), 
+                                         empty]))
     "Cat"    | 
     "string" : lrxalt(g, work, lhs, Alt([node]))
     "Alt"    : { every n := node.list[i := 1 to *node.list] do

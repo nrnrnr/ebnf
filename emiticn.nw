@@ -3,12 +3,23 @@
 procedure Icon(what)
   return case(what) of {
     "emit"           : IconEmitnt
+    "preamble"       : default_emit_preamble
+    "postamble"      : default_emit_postamble
     "stringdef"      : IconStringdef
     "infersemantics" : IconSemantics
     "precedence"     : IconPrec
     "lr"             : IconLR
+    "append"	     : IconAppend
+    "nil"	     : "[]"
+    "some"	     : IconSome
+    "none"	     : "&null"
+    "resynch"        : default_resynch
     default : error("Icon doesn't support ", what)
   }
+end
+<<*>>=
+procedure default_resynch(pos)
+  return write("#line ", pos.lineno, " ", image(pos.filename))
 end
 <<*>>=
 global ITAB, thisnt
@@ -127,10 +138,12 @@ global IconReserved
 
 procedure IconStringdef(g)
   IconReserved := set()
+  every t := !g.leaves & not member(g.nonterms, t) do
+    if any('"\'', t[1] == t[-1]) then {
+      /g.terms[t] := "\"" || t[2:-1] || "\""
+      insert(IconReserved, g.terms[t])
+    }
   every t := key(g.terms) do /g.terms[t] := t
-  every t := !g.leaves & not member(g.nonterms | g.terms, t) do
-    if any('"\'', t[1] == t[-1]) then
-      insert(IconReserved, g.terms[t] := "\"" || t[2:-1] || "\"")
   return g
 end
 <<*>>=
@@ -162,27 +175,26 @@ procedure Idosem(g, node)
     "Alt" : every Idosem(g, !node.list)
     "Cat" : {
        every Idosem(g, !node.list)
-       /node.semantics := 
-         [case *node.list of {
-            0 : "&null"
-            1 : "ii1"
-            default : {
-              l := []
-              every put(l, 1(i := 1 to *node.list, not member(g.terms, node.list[i])))
-              if *l = 1 then
-                "ii" || l[1]
-              else {
-                s := "["
-                every s ||:= "ii" || (1 to *node.list) || ", "
-                s[1:-2] || "]"
-              }
+       node.semantics := [case type(node.semantics) of {
+         "null" : {
+            "ii" || copy_number(g, node) | {
+              s := "["
+              every s ||:= "ii" || (1 to *node.list) || ", "
+              s[1:-2] || "]" | "&null"
             }
           }
-         ]
-       }
+         "string" : IconSemanticTag(g, node, node.semantics)
+         "allargs" : node.semantics.ident || "(" ||
+                      arg_list("ii", {l := []; every put(l, 1 to *node.list); l}) || ")"
+       }]
+     }
     "string" : &fail
     default  : error("impossible node type")
   }
+end
+<<*>>=
+procedure IconSemanticTag(g, catnode, ident)
+  return ident || "(" || arg_list("ii", arg_numbers(g, catnode)) || ")"
 end
 @
 <<*>>=
@@ -200,4 +212,12 @@ procedure adjustline(s)
     i := tab(many(&digits)) - 1 | ""
     return i || tab(0)
   }
+end
+<<*>>=
+procedure IconAppend(list, x)
+  return "put(" || list || ", " || x || ")"
+end
+
+procedure IconSome(x)
+  return x
 end

@@ -5,6 +5,7 @@ procedure Icon(what)
     "emit"           : IconEmitnt
     "stringdef"      : IconStringdef
     "infersemantics" : IconSemantics
+    "lalr"           : IconLalr
     default : error("Icon doesn't support ", what)
   }
 end
@@ -15,7 +16,7 @@ procedure IconEmitnt(g, nt)
     ITAB := 4
     write("link ebnflex")
   }
-  if \IconReserved then {<<emit [[reserved]]>>; IconReserved := &null}
+  if \IconReserved then {IconEmitReserved(); IconReserved := &null}
   write("procedure P_", thisnt := nt, "()")
   <<write definitions of local variables>>
   write(if type(g.nonterms[nt]) ~== "Alt" then 
@@ -34,7 +35,7 @@ n := case type(node := g.nonterms[nt]) of
             }
   }
 l := [] ; every put(l, "ii" || (1 to n))
-write(repl(" ", ITAB), "local ", commaseparate(l))
+if *l > 0 then write(repl(" ", ITAB), "local ", commaseparate(l))
 <<*>>=
 record closchema(Init, While, Do, Put1, Put2)
 
@@ -131,14 +132,16 @@ procedure IconStringdef(g)
       insert(IconReserved, g.terms[t] := "\"" || t[2:-1] || "\"")
   return g
 end
-<<emit [[reserved]]>>=
-write("procedure reserved(w)")
-write("  static words")
-write("  initial words := set([")
-every write("    ", !sort(IconReserved), ",")
-write("    ", ?IconReserved, "])")
-write("  if member(words, w) then return w")
-write("end")
+<<*>>=
+procedure IconEmitReserved()
+  write("procedure reserved(w)")
+  write("  static words")
+  write("  initial words := set([")
+  every write("    ", !sort(IconReserved), ",")
+  write("    ", ?IconReserved, "])")
+  write("  if member(words, w) then return w")
+  write("end")
+end
 <<*>>=
 procedure alternate_terms(g, l)
   s := ""

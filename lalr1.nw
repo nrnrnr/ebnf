@@ -1,25 +1,38 @@
 \section{LALR(1) parser construction}
 Yeah, right.
 <<*>>=
-global epsilon, epsilonset, endmarker, debugging, emitnt, reservedfile
+global accept, epsilon, epsilonset, endmarker, debugging, emitnt, reservedfile
 
-record item(nt, dotpos, list, uniqueid)
+record item(nt, dotpos, list, semantics, uniqueid)
 
 procedure lalr1(g, argv, emit)
   epsilon     := " %Epsilon% "
   endmarker   := " %End% "
   epsilonset  := set([epsilon])
   accept      := " %Accept% "
-  g.nonterms[accept] := Cat([g.start])		# augment re. p110
+  g.nonterms[accept] := Cat([g.start, endmarker])		# augment re. p110
   put(g.ntlist, accept)
+  g.terms[endmarker] := g.endsyntax
+  ostart := g.start
+  g.start := accept
+  checkgrammar(g)
+  compute_first(g)
+  compute_follow(g)
+  g.start := ostart
+  pushtrace("LALR")
   I0 := set([newitem(accept, 1, [g.start])])
   newitemset(closure(g, I0))
   extend(g)
-  every p := !sort(itemtab) do write(p[1], ": ", itemimage(p[2]))
+#  every p := !sort(itemtab) do write(p[1], ": ", itemimage(p[2]))
+  every write(!g.preamble)
+  emit(g)
+  every write(!g.postamble)
+  poptrace()
 end
 @
 \subsection{Construction of item sets}
 <<*>>=
+link pushtrace
 procedure closure(g, items)
   local closed
   l := sort(items)
@@ -27,17 +40,22 @@ procedure closure(g, items)
   while i := get(l) do 
     if not member(closed, i) then {
       insert(closed, i)
-      every put(l, newitem(i.list[i.dotpos], 1, genrhs(\g.nonterms[i.list[i.dotpos]])))
+      every cat := genrhs(g, i.list[i.dotpos]) do
+        put(l, newitem(i.list[i.dotpos], 1, cat.list, cat.semantics))
     }
   return closed
 end
 <<*>>=
-procedure genrhs(node)
-  case type(node) of { 
-    "Alt"    : suspend genrhs(!node.list)
-    "Cat"    : suspend node.list
-    "string" : suspend [node]
-    default  : error("impossible -- bad format for grammar")
+procedure genrhs(g, lhs)
+  static missing, empty
+  initial {missing := Cat([], "&null"); empty := Cat([], "[]") }
+  case type(node := \g.nonterms[lhs]) of { 
+    "Alt"    : suspend !node.list
+    "Cat"    : suspend node
+    "Opt"    : &null[0] & suspend genrhs(g, node.node) | missing
+    "Clo"    : &null[0] & suspend Cat([lhs, node.node], ["put(ii1, ii2)"]) | empty
+    "string" : suspend Cat([node], ["ii1"])
+    default  : error("impossible -- bad format for grammar, found node ", image(node))
   }
 end
 <<*>>=
@@ -55,17 +73,17 @@ end
 procedure addsym(g, Vg, X)
   l := []
   every i := !Vg & i.list[i.dotpos] == X do 
-    put(l, newitem(i.nt, i.dotpos+1, i.list))
+    put(l, newitem(i.nt, i.dotpos+1, i.list, i.semantics))
   return closure(g, l)
 end
 <<*>>=
 global itemtab
 
-procedure newitem(nt, dotpos, list)
+procedure newitem(nt, dotpos, list, semantics)
   static cache, uid
   initial { cache := table() ; uid := create(seq()); itemtab := table() }
   s := nt || " " || dotpos || commaseparate(list)
-  /cache[s] := item(nt, dotpos, list, n := @uid) & itemtab[n] := cache[s]
+  /cache[s] := item(nt, dotpos, list, semantics, n := @uid) & itemtab[n] := cache[s]
   return cache[s]
 end
 <<*>>=
@@ -78,27 +96,55 @@ procedure newitemset(s)
   initial { every itemsets | itemsetnos := table() ; itemsetlist := []}
   (/itemsets[im := itemsetimage(s)] := s, 
    itemsetnos[s] := *itemsets, 
-   put(itemsetlist, s)) & {
-     write("Added set ", *itemsets, ":")
-     every write("\t", itemimage(!s))
-  }
+   put(itemsetlist, s)) & if *itemsets % 15 = 0 then writes(&errout, ".")
   return itemsets[im]
 end
 <<*>>=
-global goto
+global goto, gotodefault
+
+
+procedure addgoto(I, X, Iprime)
+  if goto[I] === gotodefault then  
+    goto[I] := table()
+  goto[I][X] := Iprime
+  return
+end
 
 procedure extend(g)
-  initial goto := table()
+  initial goto := table(gotodefault := table())
   i := 1
+  writes(&errout, "Computing LR(0) items...")
   while i <= *itemsetlist do {
-    every it := !(I := itemsetlist[i]) & X := it.list[it.dotpos] do {
-      writes("For goto(", i, ", ", X, ") ")
-      goto[itemsetnos[I] || " " || X] := newitemset(addsym(g, I, X))
-    }
+    every it := !(I := itemsetlist[i]) & X := it.list[it.dotpos] do
+      addgoto(I, X, newitemset(addsym(g, I, X)))
     i +:= 1
   }
+  write(&errout, " done")
 end  
 @
-\subsection{Computing lookahead sets}
-@
 \subsection{Constructing the parsing action and goto tables}
+<<*>>=
+procedure actions(g, I)
+  t := table()
+  every it := !I do
+    if member(g.terms, a := it.list[it.dotpos]) then {
+      addaction(t, g.terms[a], [it, "shift", goto[I][a]])
+    } else if it.dotpos = *it.list + 1 then {
+      if it.nt == accept then
+        addaction(t, g.endsyntax, [it, "accept"])
+      else
+        every addaction(t, g.terms[!follow[it.nt]], [it, "reduce", it])
+    }
+  if not ((!t)[2] == "reduce") then t[0] := [&null, "error"]
+  return t
+end
+<<*>>=
+procedure addaction(t, term, action)
+  /t[term] := action | {
+    write(&errout, "\n", action[2], "/", t[term][2], " conflict:")
+    every write(&errout, "\t", itemimage((action|t[term])[1]))
+    if t[term][2] == "reduce" & action[2] = "shift" then t[term] := action
+  }
+end
+@
+\subsection{Computing lookahead sets}

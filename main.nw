@@ -5,26 +5,59 @@ procedure main(args)
   emitter := Icon
   while case args[1] of {
     "-flatten" : flatten := args[1]
+    "-lalr"    : dolalr := args[1]
+    "-lr1"     : lr1 := args[1]
     "-parser"  : doparser  := args[1]
     "-grammar" : dogrammar := args[1]
     "-icn" : emitter := Icon
     "-c"   : emitter := C
-    default : &fail
+    default : if args[1][1] == "-" then stop("Unrecognized argument ", args[1])
   } do get(args)
-  if /doparser & /dogrammar then doparser := 1
-  i := 1
-  while args[i][1] == "-" do  i +:= 1
-  case *args[i:0] of {
+  if /doparser & /dogrammar & /dolalr then doparser := 1
+  case *args of {
     0       : g := readgrammar(&input)
-    1       : g := readgrammar(open(filename := args[1]))
-    default : stop("Usage: EBNF [-d] [file]")
+    1       : g := readgrammar(open(filename := args[1])) | 
+                               write(&errout, "Can't open ", filename)
+    default : usage()
   }
   emitter("stringdef")(g)
   if \flatten then
     flattengrammar(g)
+  if \lr1 | \dolalr then
+    lrxform(g)
   writegrammar(\dogrammar & &output, g)
   if \doparser then {
     emitter("infersemantics")(g)
-    ll1(g, args[1:i], emitter("emit"))
+    ll1(g, args, emitter("emit"))
   }
+  if \dolalr then {
+    emitter("infersemantics")(g)
+    lalr1(g, args, emitter("lalr"))
+  }
+end
+
+procedure usage()
+  every write("Usage: ebnf [options] [grammarfile]" |
+"Options:" | 
+"-flatten  flatten grammar -- needed if LL(1) uses semantic actions" |
+"-lalr     emit SLR(1) parser (Icon only)" |
+"-lr1      remove EBNF constructs & make LR(1) grammar" |
+"-parser   spit an LL(1) recursive descent parser on stdout (default)" |
+"-grammar  rewrite the grammar on stdout (after flattening or yaccifying" |
+"-icn      emit Icon (the default)" |
+"-c        emit a C parser" |
+"" |
+"Useful combinations:" |
+"  New grammars w/o extended BNF:" |
+"    -flatten -grammar" |
+"    -lr1 -grammar" |
+"  Parsers:" |
+"    -lalr" |
+"    -flatten -parser"
+)
+  stop()
+end
+
+procedure impossible(L[])
+  error ! push(L, "This can't happen --- ")
 end

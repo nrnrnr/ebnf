@@ -13,7 +13,11 @@ procedure flattengrammar(g)
   work := []
   every lhs := !g.ntlist do
     every put(work, lhs | g.nonterms[lhs])
-  while flattenpair(g, work, get(work), get(work))
+  g.ntlist := []
+  while lhs := get(work) & node := get(work) do {
+    put(g.ntlist, lhs)
+    flattenpair(g, work, lhs, node)
+  }
   return g
 end
 <<*>>=
@@ -40,8 +44,7 @@ end
 
 procedure cutnode(g, work, lhs, node)
   g.nonterms[s := gensym(lhs)] := node
-  put(g.ntlist, s)
-  every put(work, s | node)
+  every push(work, node | s)
   return s
 end
 <<*>>=
@@ -52,3 +55,4 @@ procedure gensym(id)
   /syms[id] := create(seq())
   return id || "_" || @ syms[id]
 end
+

@@ -3,10 +3,10 @@
 global epsilon, epsilonset, endmarker, debugging, emitnt, reservedfile
 
 procedure ll1(g, argv, emit)
-  epsilon    := " %Epsilon% "
-  endmarker  := " %End% "
-  epsilonset := set([epsilon])
-  ntlist     := g.ntlist		# nonterms in order of appearance
+  epsilon     := " %Epsilon% "
+  endmarker   := " %End% "
+  epsilonset  := set([epsilon])
+  ntlist      := g.ntlist		# nonterms in order of appearance
   while case argv[1] of {
     "-d" : debugging := "-d"
     "-w" : weak := "-w"
@@ -143,7 +143,8 @@ end
 <<*>>=
 procedure emitcode(g, ntlist, emitter)
   g.terms[endmarker] := g.endsyntax
-  every emitter(g, !ntlist)
+  every nt := !ntlist & not member(g.externalnts, nt) do
+    emitter(g, nt)
   delete(g.terms, endmarker)
 end
 @

@@ -1,0 +1,49 @@
+\section{Transforming the grammar to LR(1) form}
+The idea is to put every right-hand side into the normal form
+[[Alt({Cat({string})})]].
+<<*>>=
+procedure lrxform(g)
+  work := []
+  every lhs := !g.ntlist do
+    every put(work, lhs | g.nonterms[lhs])
+  g.ntlist := []
+  while lrxpair(g, work, get(work), get(work))
+  return g
+end
+<<*>>=
+procedure lrxpair(g, work, lhs, node)
+  static epsilon
+  initial { epsilon := Cat([]) }
+  put(g.ntlist, lhs)
+  return g.nonterms[lhs] := lrxalt(g, work, lhs, node)
+end
+
+procedure lrxalt(g, work, lhs, node)   # produce Alt-Cat-string
+  static missing, empty
+  initial { missing := Cat([], ["&null"]); empty := Cat([], ["[]"]) }
+  return case type(node) of {
+    "Opt"    : lrxalt(g, work, lhs, Alt([node.node, missing]))
+    "Clo"    : lrxalt(g, work, lhs, Alt([Cat([lhs, node.node],["put(ii1, ii2)"]), empty]))
+    "Cat"    | 
+    "string" : lrxalt(g, work, lhs, Alt([node]))
+    "Alt"    : { every n := node.list[i := 1 to *node.list] do
+                   node.list[i] := lrxcat(g, work, lhs, n) 
+                 node
+               }
+    default  : error("impossible node type")
+  }
+  return
+end
+
+procedure lrxcat(g, work, lhs, node)   # produce Cat-string
+  return case type(node) of {
+    "Opt" | "Clo" | "Alt" : lrxcat(g, work, lhs, cutnode(g, work, lhs, node))
+    "string" : lrxcat(g, work, lhs, Cat([node],["ii1"]))
+    "Cat"    : { every n := node.list[i := 1 to *node.list] & type(n) ~== "string" do
+                   node.list[i] := cutnode(g, work, lhs, n) 
+                 node
+               }
+    default  : error("impossible node type")
+  }
+  return
+end

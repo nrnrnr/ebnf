@@ -55,7 +55,7 @@ Many programs will use one of these two procedures much of the time.
 [[expect]] consumes a token, printing an error message if it is not present.
 <<*>>=
 procedure gobble(t)
-    if token == t then { lex(); return t }
+    if token == t then return 1(.tval, lex())
 end
 
 procedure expect(t, nt)

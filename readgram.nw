@@ -21,7 +21,8 @@ record grammar(nonterms, 	# map nonterminal symbol -> right-hand side
 	       leaves, 		# set of terminals and nonterminals used in productions
 	       preamble, 	# list of pass-throughs
 	       postamble,	# list of pass-throughs
-	       endsyntax)	# syntax for token to follow grammar
+	       endsyntax,	# syntax for token to follow grammar
+               externalnts)	# nonterminals for which external parsers are supplied
 @
 Each production may either be a string (terminal or nonterminal), or a combination 
 of strings using the four operators of EBNF: alternation ([[|]]), closure ([[{...}]]),
@@ -35,13 +36,14 @@ record Cat(list, semantics, position)
 procedure readgrammar(file)
   local lhs, rhs, preamble, postamble, ln, ntlist, leaves, terms, nonterms, endsyntax
   every preamble | postamble | ntlist := []
-  every leaves := set()	
+  every leaves | externalnts := set()	
   every terms | nonterms := table()
   endsyntax := "EOF"
   <<read [[preamble]] from [[file]], adding to [[terms]]>>
   <<read productions from [[file]], adding to [[nonterms]] and [[leaves]]>>
   while put(postamble, read(file))
-  return grammar(nonterms, terms, ntlist, start, leaves, preamble, postamble, endsyntax)
+  return grammar(nonterms, terms, ntlist, start, leaves, preamble, postamble, endsyntax,
+                 externalnts)
 end
 @
 <<read [[preamble]] from [[file]], adding to [[terms]]>>=
@@ -59,6 +61,8 @@ while lineno +:= 1 &
       endsyntax := tab(0)
     else if ="%start " then
       /start := tab(0) | error("start symbol already set")
+    else if ="%external " then
+      insert(externalnts, tab(0))
     else if ="#line " then
       ln := tab(many(&digits)) & tab(many(' \t')) &
           pos(0) | (="\"" & filename := tab(upto('"')) & ="\"" & pos(0))

@@ -1,0 +1,104 @@
+\section{LALR(1) parser construction}
+Yeah, right.
+<<*>>=
+global epsilon, epsilonset, endmarker, debugging, emitnt, reservedfile
+
+record item(nt, dotpos, list, uniqueid)
+
+procedure lalr1(g, argv, emit)
+  epsilon     := " %Epsilon% "
+  endmarker   := " %End% "
+  epsilonset  := set([epsilon])
+  accept      := " %Accept% "
+  g.nonterms[accept] := Cat([g.start])		# augment re. p110
+  put(g.ntlist, accept)
+  I0 := set([newitem(accept, 1, [g.start])])
+  newitemset(closure(g, I0))
+  extend(g)
+  every p := !sort(itemtab) do write(p[1], ": ", itemimage(p[2]))
+end
+@
+\subsection{Construction of item sets}
+<<*>>=
+procedure closure(g, items)
+  local closed
+  l := sort(items)
+  closed := set()
+  while i := get(l) do 
+    if not member(closed, i) then {
+      insert(closed, i)
+      every put(l, newitem(i.list[i.dotpos], 1, genrhs(\g.nonterms[i.list[i.dotpos]])))
+    }
+  return closed
+end
+<<*>>=
+procedure genrhs(node)
+  case type(node) of { 
+    "Alt"    : suspend genrhs(!node.list)
+    "Cat"    : suspend node.list
+    "string" : suspend [node]
+    default  : error("impossible -- bad format for grammar")
+  }
+end
+<<*>>=
+procedure itemimage(i)
+  return commaseparate(["[", i.nt, "->"] ||| i.list[1:i.dotpos] ||| 
+                       ["."] ||| i.list[i.dotpos:0] ||| ["]"], " ")
+end
+<<*>>=
+procedure itemsetimage(s)
+  l := []
+  every put(l, (!s).uniqueid)
+  return commaseparate(sort(l), " ")
+end
+<<*>>=
+procedure addsym(g, Vg, X)
+  l := []
+  every i := !Vg & i.list[i.dotpos] == X do 
+    put(l, newitem(i.nt, i.dotpos+1, i.list))
+  return closure(g, l)
+end
+<<*>>=
+global itemtab
+
+procedure newitem(nt, dotpos, list)
+  static cache, uid
+  initial { cache := table() ; uid := create(seq()); itemtab := table() }
+  s := nt || " " || dotpos || commaseparate(list)
+  /cache[s] := item(nt, dotpos, list, n := @uid) & itemtab[n] := cache[s]
+  return cache[s]
+end
+<<*>>=
+global itemsets		# table with keys strings, values item sets
+global itemsetnos
+global itemsetlist
+
+procedure newitemset(s)
+  local im
+  initial { every itemsets | itemsetnos := table() ; itemsetlist := []}
+  (/itemsets[im := itemsetimage(s)] := s, 
+   itemsetnos[s] := *itemsets, 
+   put(itemsetlist, s)) & {
+     write("Added set ", *itemsets, ":")
+     every write("\t", itemimage(!s))
+  }
+  return itemsets[im]
+end
+<<*>>=
+global goto
+
+procedure extend(g)
+  initial goto := table()
+  i := 1
+  while i <= *itemsetlist do {
+    every it := !(I := itemsetlist[i]) & X := it.list[it.dotpos] do {
+      writes("For goto(", i, ", ", X, ") ")
+      goto[itemsetnos[I] || " " || X] := newitemset(addsym(g, I, X))
+    }
+    i +:= 1
+  }
+end  
+@
+\subsection{Computing lookahead sets}
+@
+\subsection{Constructing the parsing action and goto tables}

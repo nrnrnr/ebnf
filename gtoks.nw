@@ -1,10 +1,11 @@
 <<*>>=
-global SEMANTICS
+global SEMANTICS, IDENT
 procedure scantokens()
   static alphanum, semantics
   initial { 
     alphanum := &letters ++ &digits ++ '_'
     SEMANTICS := " semantics "
+    IDENT := " identifier "
   }
   repeat {
     if /semantics then {

@@ -1,3 +1,4 @@
+% -*- mode: Noweb; noweb-code-mode: icon-mode -*-
 \section{Reading in the grammar}
 A grammar is a pairing of the names of nonterminal symbols with productions.
 It's also necessary to know the output syntax of the terminals and the order in which
@@ -17,6 +18,7 @@ introduced as terminals.
 record grammar(nonterms, 	# map nonterminal symbol -> right-hand side
                terms, 		# map terminal symbol (name or string) to output syntax
                termtypes,	# map terminal symbol to type of tval (used in ML)
+               nttypes,		# map nontterminal symbol to type of value (used in ML)
 	       ntlist, 		# list of nonterminals in order of appearance
 	       start, 		# start symbol
 	       leaves, 		# set of terminals and nonterminals used in productions
@@ -41,20 +43,21 @@ record Cat(list, semantics, precterm, position)
 <<*>>=
 procedure readgrammar(file)
   local lhs, rhs, preamble, postamble, ntlist, leaves, terms, nonterms, endsyntax,
-        prec, assoc, nextprec, termtypes, termtype, t, att, attributes
+        prec, assoc, nextprec, termtypes, termtype, nttypes, nttype, t, att, attributes
   every preamble | postamble | ntlist := []
   every leaves | externalnts := set()	
-  every terms | termtypes | nonterms | prec | assoc | attributes := table()
+  every terms | termtypes | nttypes | nonterms | prec | assoc | attributes := table()
   endsyntax := "EOF"
   nextprec := 1
-  <<read [[preamble]] from [[file]], adding to [[terms]] and [[termtypes]]>>
+  <<read [[preamble]] from [[file]], adding to [[terms]], [[termtypes]], and [[nttypes]]>>
   <<read productions from [[file]], adding to [[nonterms]] and [[leaves]]>>
   while put(postamble, read(file))
-  return grammar(nonterms, terms, termtypes, ntlist, start, leaves, preamble, postamble,
+  return grammar(nonterms, terms, termtypes, nttypes,
+	         ntlist, start, leaves, preamble, postamble,
                  endsyntax, externalnts, prec, assoc, attributes)
 end
 @
-<<read [[preamble]] from [[file]], adding to [[terms]] and [[termtypes]]>>=
+<<read [[preamble]] from [[file]], adding to [[terms]], [[termtypes]], and [[nttypes]]>>=
 lineno := 0
 while lineno +:= 1 &
   thisline := read(file) ? 
@@ -70,6 +73,17 @@ while lineno +:= 1 &
       pos(0) | (terms[t] := tab(upto(' \t') | 0))
       optwhite()
       pos(0) | error("syntax: %term gsyntax [(type)] [osyntax]")
+    } else if (="%type", white()) then {
+      ="<" | type_syntax()
+      nttype := tab(upto('>')) | type_syntax()
+      =">"
+      white()
+      while not(pos(0)) do {
+        nt := tab(upto(' \t') | 0)
+        (/nttypes[nt] := nttype) |
+           error("Nonterminal ", nt, " already has type ", nttypes[nt])
+       white()
+      }
     } else if ="%end " then
       endsyntax := tab(0)
     else if ="%start " then
@@ -128,6 +142,11 @@ while not (token == ("%%" | EOF)) do {
 }
 <<*>>=
 link ebnfint #
+@ 
+<<*>>=
+procedure type_syntax()
+  suspend error("syntax: %type <type> nonterm ...")
+end
 @ 
 \subsection{The nature of productions}
 @

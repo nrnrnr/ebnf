@@ -1,0 +1,241 @@
+\section{SLR(1) parser construction}
+<<*>>=
+global accept, epsilon, epsilonset, endmarker, debugging, emitnt, reservedfile
+
+record item(nt, dotpos, list, semantics, prec, assoc, uniqueid)
+
+<<*>>=
+procedure slr1(g, argv, emit)
+  epsilon     := " %Epsilon% "
+  endmarker   := " %End% "
+  epsilonset  := set([epsilon])
+  accept      := " %Accept% "
+  g.nonterms[accept] := Cat([g.start, endmarker])		# augment re. p110
+  put(g.ntlist, accept)
+  g.terms[endmarker] := g.endsyntax
+  ostart := g.start
+  g.start := accept
+  checkgrammar(g)
+  compute_first(g)
+  compute_follow(g)
+  g.start := ostart
+  pushtrace("LALR")
+  I0 := set([newitem(accept, 1, [g.start])])
+  newitemset(closure(g, I0))
+  extend(g)
+  lrdiag(f := if !argv == "-d" then open("i.output", "w"), g) & close(f)
+#  every p := !sort(itemtab) do write(p[1], ": ", itemimage(p[2]))
+  every write(!g.preamble)
+  emit(g)
+  every write(!g.postamble)
+  poptrace()
+end
+@
+\subsection{Construction of item sets}
+<<*>>=
+link pushtrace
+procedure closure(g, items)
+  local closed
+  l := sort(items)
+  closed := set()
+  while i := get(l) do 
+    if not member(closed, i) then {
+      insert(closed, i)
+      every cat := genrhs(g, i.list[i.dotpos]) do
+        put(l, newitem(i.list[i.dotpos], 1, cat.list, cat.semantics,
+                       g.prec [\cat.precterm] | &null, 
+                       g.assoc[\cat.precterm] | &null))
+    }
+  return closed
+end
+<<*>>=
+procedure genrhs(g, lhs)
+  static missing, empty
+  initial {missing := Cat([], "&null"); empty := Cat([], "[]") }
+  case type(node := \g.nonterms[lhs]) of { 
+    "Alt"    : suspend !node.list
+    "Cat"    : suspend node
+    "Opt"    : &null[0] & suspend genrhs(g, node.node) | missing
+    "Clo"    : &null[0] & suspend Cat([lhs, node.node], ["put(ii1, ii2)"]) | empty
+    "string" : suspend Cat([node], ["ii1"])
+    default  : error("impossible -- bad format for grammar, found node ", image(node))
+  }
+end
+<<*>>=
+procedure itemimage(i)
+  l := ["[", i.nt,"->"] ||| i.list[1:i.dotpos] ||| ["."] ||| i.list[i.dotpos:0] ||| ["]"]
+  put(l, "(" || \i.assoc || " " || \i.prec || ")")
+  return commaseparate(l, " ")
+end
+<<*>>=
+procedure itemsetimage(s)
+  l := []
+  every put(l, (!s).uniqueid)
+  return commaseparate(sort(l), " ")
+end
+<<*>>=
+procedure addsym(g, Vg, X)
+  l := []
+  every i := !Vg & i.list[i.dotpos] == X do 
+    put(l, newitem(i.nt, i.dotpos+1, i.list, i.semantics, i.prec, i.assoc))
+  return closure(g, l)
+end
+<<*>>=
+global itemtab
+
+procedure newitem(nt, dotpos, list, semantics, prec, assoc)
+  static cache, uid
+  initial { cache := table() ; uid := create(seq()); itemtab := table() }
+  s := nt || " " || dotpos || " " || (\prec | "-") || (\assoc | "") || 
+       commaseparate(list)
+  if /cache[s] := item(nt, dotpos, list, semantics, prec, assoc, n := @uid) then
+    itemtab[n] := cache[s]
+  return cache[s]
+end
+<<*>>=
+global itemsets		# table with keys strings, values item sets
+global itemsetnos
+global itemsetlist
+
+procedure newitemset(s)
+  local im
+  initial { every itemsets | itemsetnos := table() ; itemsetlist := []}
+  (/itemsets[im := itemsetimage(s)] := s, 
+   itemsetnos[s] := *itemsets, 
+   put(itemsetlist, s)) & if *itemsets % 15 = 0 then writes(&errout, ".")
+  return itemsets[im]
+end
+<<*>>=
+global goto, gotodefault
+
+
+procedure addgoto(I, X, Iprime)
+  if goto[I] === gotodefault then  
+    goto[I] := table()
+  goto[I][X] := Iprime
+  return
+end
+
+procedure extend(g)
+  initial goto := table(gotodefault := table())
+  i := 1
+  writes(&errout, "Computing LR(0) items...")
+  while i <= *itemsetlist do {
+    every it := !(I := itemsetlist[i]) & X := it.list[it.dotpos] do
+      addgoto(I, X, newitemset(addsym(g, I, X)))
+    i +:= 1
+  }
+  write(&errout, " done")
+end  
+@
+\subsection{Constructing the parsing action and goto tables}
+<<*>>=
+global srconflictcount, rrconflictcount
+global reduceditems
+
+procedure resetconflicts()
+  srconflictcount := rrconflictcount := 0
+  reduceditems := set()
+end
+
+procedure actions(g, I, silent)
+  t := table()
+  every it := !I do
+    if member(g.terms, a := it.list[it.dotpos]) then {
+      addaction(g, t, g.terms[a], [it, "shift", goto[I][a]], silent)
+    } else if it.dotpos = *it.list + 1 then {
+      if it.nt == accept then
+        addaction(g, t, g.endsyntax, [it, "accept"], silent)
+      else
+        every addaction(g, t, g.terms[!follow[it.nt]], [it, "reduce", it], silent)
+    }
+  if not ((!t)[2] == "reduce") then t[0] := [&null, "error"]
+  return t
+end
+<<*>>=
+procedure sameaction(a1, a2)
+  return case a1[2] == a2[2] of {
+    "shift"  | "reduce" : a1[3] === a2[3]
+    "accept" | "error"  : a1
+  }
+end
+<<*>>=
+procedure actionlists(g, I)
+  t := table()
+  every it := !I do
+    if member(g.terms, a := it.list[it.dotpos]) then {
+      appaction(t, g.terms[a], [it, "shift", goto[I][a]])
+    } else if it.dotpos = *it.list + 1 then {
+      if it.nt == accept then
+        appaction(t, g.endsyntax, [it, "accept"])
+      else
+        every appaction(t, g.terms[!follow[it.nt]], [it, "reduce", it])
+    }
+  if not ((!!t)[2] == "reduce") then t[0] := [[&null, "error"]]
+  return t
+end
+<<*>>=
+procedure appaction(t, term, action)
+  /t[term] := []
+  sameaction(!t[term], action) | put(t[term], action)
+end
+<<*>>=
+procedure addaction(g, t, term, action, silent)
+  (/t[term] := action) | sameaction(t[term], action) | {
+    s := (a := t[term] | action, a[2] == "shift", a)
+    r := (a := t[term] | action, a[2] == "reduce", a)
+    <<if possible, disambiguate [[s]] and [[r]] and return>>
+    if /silent then <<print message about conflict>>
+    if \s & \r then t[term] := s
+  }
+end
+<<if possible, disambiguate [[s]] and [[r]] and return>>=
+if \s & \r & \s[1].prec & \r[1].prec then {
+  if      s[1].prec > r[1].prec then t[term] := s
+  else if s[1].prec < r[1].prec then t[term] := r
+  else case s[1].assoc == r[1].assoc of {
+    "left"  : t[term] := r
+    "right" : t[term] := s
+    "nonassoc" : t[term] := [&null, "error"]
+    default : impossible("precedence")
+  } | impossible("precedence mismatch")
+  return
+}
+<<print message about conflict>>=
+if \s & \r then {
+  write(&errout, "shift/reduce conflict on ", term, ":")
+  every write(&errout, "\t", itemimage((s|r)[1]))
+} else {
+  write(&errout, "\n", action[2], "/", t[term][2], " conflict on ", term, ":")
+  every write(&errout, "\t", itemimage((action|t[term])[1]))
+}
+@
+\subsection{Dumping diagnostics}
+<<*>>=
+procedure lrdiag(outfile, g)
+  every i := 1 to *itemsetlist do {
+    acl := actionlists(g, itemsetlist[i])
+    every *(ac := acl[tok := key(acl)]) > 1 do
+      {<<complain about conflict on [[tok]] in [[ac]]>>}
+    write(outfile, "state ", i)
+    every write(outfile, "\t", itemimage(!itemsetlist[i]))
+    write(outfile)
+    every ac := \acl[tok := 0 ~=== key(acl) | 0] do
+      every write(outfile, "\t", (0 ~=== tok | ".")\1, "  ",
+        A := !ac & case A[2] of {
+          "shift"  : "shift " || itemsetnos[A[3]]
+          "reduce" : "reduce " || itemimage(A[3]) || " (" || A[3].uniqueid || ")"
+          "error"  : "error"
+          "accept" : "accept"
+          default  : impossible("action type ", A[2])
+        })
+    write(outfile)
+  }
+  return
+end
+<<complain about conflict on [[tok]] in [[ac]]>>=
+l := []
+every put(l, (!ac)[2])
+write(outfile, i, ": ", commaseparate(l, "/"), " conflict on ", string(tok) | ".")
+@
+\subsection{Computing lookahead sets}

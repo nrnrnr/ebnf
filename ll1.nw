@@ -1,0 +1,210 @@
+\section{Generating an LL(1) parser}
+<<*>>=
+global epsilon, epsilonset, endmarker, debugging, emitnt, reservedfile
+
+procedure ll1(g, argv, emit)
+  epsilon    := "%Epsilon%"
+  endmarker  := "%End%"
+  epsilonset := set([epsilon])
+  ntlist     := g.ntlist		# nonterms in order of appearance
+  while case argv[1] of {
+    "-d" : debugging := "-d"
+    "-w" : weak := "-w"
+    "-s" : ntlist := sort(ntlist)
+    default : &fail
+  } do get(argv)
+  while argv[1][1] == "-" do write(&errout, "Ignoring ", get(argv))
+  checkgrammar(g)
+  if /weak then
+    every lhs := key(g.nonterms) do 
+      g.nonterms[lhs] := Alternate(g.nonterms[lhs], Alt([]))
+  compute_first(g)
+  compute_follow(g)
+  if \debugging then { emitff(g); emitpredict(g) }
+  showconflicts(g)
+  every write(!g.preamble)
+  emitcode(g, ntlist, emit)
+  every write(!g.postamble)
+end
+@
+\subsection{First and follow sets}
+Computing first and follow sets uses iterative algorithms that repeatedly 
+add to sets.  Adding to a set usually means another iteration has to be done if the
+set changes.  [[addset]] adds to a set, succeeding only if the set
+actually changes.
+<<*>>=
+procedure addset(old, new)
+  n := *old
+  every insert(old, !new)
+  return *old > n
+end
+@
+FIRST is computed bottom-up, which means that every time the FIRST set
+of a nonterminal changes, we have to check every tree all over again.
+[[first_tree]] computes the FIRST sets of all grammar nodes in a tree; 
+if the FIRST set of a root node changes, we have to iterate.
+
+The base cases are that the FIRST set of a terminal is the terminal itself
+and the inital FIRST set of a nonterminal is empty.
+[[first_tree]] initializes other FIRST sets to be empty.
+<<*>>=
+global first
+procedure compute_first(g)
+  local changes, x, p
+  first := table()
+  every first[t:= key(g.terms)] := set([t])
+  every first[key(g.nonterms)] := set()
+  changes := 1
+  while \changes do {
+    changes := &null
+    every lhs := key(g.nonterms) do
+      changes := addset(first[lhs], first_tree(g.nonterms[lhs]))
+  }
+end
+@
+An operation used in computing both FIRST and FOLLOW sets
+is finding the FIRST set of a list of concatenated nodes.
+The FIRST set of the first node is used, and we continue if the
+FIRST node can produce [[epsilon]].
+If the entire string can produce [[epsilon]], [[tail]] is added.
+[[tail]] defaults to [[epsilonset]].
+<<*>>=
+procedure first_list(l, tail)
+  if *l = 0 then 
+    return \tail | epsilonset
+  else if member(first[l[1]], epsilon) then 
+    return (first[l[1]] -- epsilonset) ++ first_list(l[2:0], tail)
+  else
+    return first[l[1]]
+end
+@
+FIRST sets are computed bottom-up.
+<<*>>=
+procedure first_tree(node)
+  case type(node) of {
+    "Cat" | "Alt" : every first_tree(!node.list)
+    "Clo" | "Opt" : first_tree(node.node)
+  }
+  /first[node] := set()
+  case type(node) of {
+    "string"      : &null
+    "Cat"         :       addset(first[node], first_list(node.list))
+    "Alt"         : every addset(first[node], first[!node.list])
+    "Clo" | "Opt" :       addset(first[node], first[node.node] ++ epsilonset)
+    default       : error("unknown node type")
+  }
+  return first[node]
+end
+@
+FOLLOW sets are computed top-down, so it's a simple matter to put every changed
+nonterminal on a work list.
+<<*>>=
+global start, follow, tofollow
+procedure compute_follow(g)
+  local empty
+  follow := table()
+  empty := set()
+  tofollow := []
+  follow_tree(g, g.start, set([endmarker]))
+  every follow_tree(g, !g.nonterms | key(g.nonterms), empty)
+  while follow_tree(g, get(tofollow), get(tofollow))
+end
+
+procedure follow_tree(g, node, new)
+  local change
+  change := &null
+  change := /follow[node] := set()
+  change := addset(follow[node], new)
+  if \change then
+    case type(node) of {
+      "string" : if \g.nonterms[node] then every put(tofollow, g.nonterms[node] | new)
+      "Cat"    : {
+        every i := 1 to *node.list - 1 do
+          follow_tree(g, node.list[i], first_list(node.list[i+1:0], follow[node]))
+        follow_tree(g, node.list[*node.list], new)
+      }
+      "Alt"         : every follow_tree(g, !node.list, new)
+      "Clo" | "Opt" : follow_tree(g, node.node, new)
+      default       : error("unknown node type")
+    }
+  return
+end
+@
+\subsection{Emitting code}
+It's easier to show first how to emit code, then later to show
+how to check for conflicts.
+
+When predicting for a node, we combine the node's FIRST set with the
+parent's FOLLOW set.  The parent of a root node is a left-hand side.
+<<*>>=
+procedure predict(node, parent)
+  return first_list([node], follow[parent])
+end
+<<*>>=
+procedure emitcode(g, ntlist, emitter)
+  g.terms[endmarker] := endsyntax
+  every emitter(g, !ntlist)
+  delete(g.terms, endmarker)
+end
+@
+\subsection{Diagnostics}
+<<*>>=
+procedure emitpredict(g)
+  write(&errout, "PREDICT Sets:")
+  write(&errout)
+  every nt := !sort(g.nonterms) do
+    if type(nt[2]) == "Alt" then every showpredict(nt[1], !nt[2].list)
+    else showpredict(nt[1], nt[2])
+end
+
+procedure showpredict(lhs, node)
+  write(&errout, prodimage(lhs, node))
+  every write(&errout, "\t", !sort(predict(node, lhs)))
+  write(&errout)
+end
+<<*>>=
+procedure emitff(g)
+  every l := (!sort(g.nonterms))[1] do {
+    write(&errout, l)
+    write(&errout, "\tFIRST")
+    every write(&errout, "\t\t", !sort(first[l]))
+    write(&errout, "\tFOLLOW")
+    every write(&errout, "\t\t", !sort(follow[l]))
+    write(&errout)
+  }
+end
+<<*>>=
+procedure showconflicts(g)
+  local p1, p2, nt, i1, i2, overlap, count
+
+  count := 0
+  every nt := !sort(g.nonterms) do
+    count +:= conflicts(nt[2], nt[1])
+  if count > 0 then 
+    write(&errout, count, " conflicts.")
+  else if \debugging then
+    write(&errout, "Grammar is OK")
+end
+@
+<<*>>=
+procedure conflicts(node, lhs)
+  n := 0
+  case type(node) of {
+    "Alt" : {
+      p := []
+      every put(p, predict(!node.list, node))
+      if *(p[i := 1 to *p] ** p[j := i+1 to *p]) > 0 & n +:= 1 then
+        write(&errout, lhs, ": can't predict alternatives among ", nodeimage(node))
+      every n +:= conflicts(!node.list, lhs)
+    }
+    "Opt" | "Clo" : {
+      if *(predict(node.node, node) ** follow[node]) > 0 & n +:= 1 then
+        write(&errout, lhs, ": can't decide whether to take ", nodeimage(node))
+      n +:= conflicts(node.node, lhs)
+    }
+    "Cat"    : every n +:= conflicts(!node.list, lhs)
+    "string" : &null
+    default  : error("this can't happen -- error node type")
+  }
+  return n
+end

@@ -1,0 +1,42 @@
+\section{Emitting C code}
+<<*>>=
+procedure Cemitnt(g, nt)
+  write(nt, "() {")
+  if type(rhs := g.nonterms[nt]) ~== "Alt" then
+    write("\t/* ", prodimage(rhs, nt), " */")
+  Cemitnode(nt)
+  write("}")
+  write()
+end
+
+procedure Cemitnode(node)
+  case type(node) of {
+    "Alt" : {
+      write("\tswitch (token) {")
+      every n := !node.list do {
+        every write("\tcase ", g.terms[!sort(predict(n, node))], ":");
+        write("\t\t/* ", 
+              if g.nonterms[l := key(g.nonterms)] === node then prodimage(l, n) 
+              else nodeimage(n), " */")
+        Cemitnode(n)
+        write("\t\tbreak;")
+        write()
+      }
+      write("\tdefault:")
+      write("\t\tparse_error();");
+      write("\t}")
+    }
+    "Cat" : every Cemitnode(!node.list)
+    "Opt" | "Clo" : {
+      write(if type(node) == "Opt" then "\tif (0" else "\twhile (0")
+      every write("\t|| token == ", !sort(first[node]--epsilonset))
+      write("\t) {")
+      write("\t\t/* ", nodeimage(node), " */")
+      Cemitnode(node.node)
+      write("\t}")
+    }
+    "string" :
+       write("\t\tmatch(", \g.terms[node], ");") | write("\t\t", node, "();");
+    default : error("this can't happen -- error node type")
+  }
+end

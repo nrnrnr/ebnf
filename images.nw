@@ -1,0 +1,26 @@
+For debugging purposes, it's useful to be able to print nodes and productions.
+<<*>>=
+procedure nodeimage(node, parent)
+  case type(node) of {
+    "Opt" : return "[" || nodeimage(node.node, node) || "]"
+    "Clo" : return "{" || nodeimage(node.node, node) || "}"
+    "Cat" : {
+       s := ""
+       every s ||:= " " || nodeimage(!node.list, node)
+       return s[2:0] | ""
+     }
+    "Alt" : {
+       s := ""
+       every s ||:= " | " || nodeimage(!node.list, node)
+       return if type(parent) == "Cat" then "(" || s[4:0] || ")" else s[4:0]
+     }
+    "string" : return node
+    default  : error("impossible node type")
+  }
+end
+<<*>>=
+procedure prodimage(lhs, node)
+  s := nodeimage(node)
+  return lhs || (if *s > 0 then " : " else " :") || s
+end
+@

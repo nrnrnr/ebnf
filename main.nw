@@ -1,0 +1,18 @@
+<<*>>=
+procedure main(args)
+  emitter := Cemitnt
+  stringdef := Cstringdef
+  while case args[1] of {
+    "-icn" : { emitter := IconEmitnt; stringdef := IconStringdef }
+    default : &fail
+  } do get(args)
+  i := 1
+  while args[i][1] == "-" do  i +:= 1
+  case *args[i:0] of {
+    0       : g := readgrammar(&input)
+    1       : g := readgrammar(open(filename := args[1]))
+    default : stop("Usage: EBNF [-d] [file]")
+  }
+  stringdef(g)
+  ll1(g, args[1:i], emitter)
+end

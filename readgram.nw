@@ -1,0 +1,152 @@
+\section{Reading in the grammar}
+A grammar is a pairing of the names of nonterminal symbols with productions.
+It's also necessary to know the output syntax of the terminals and the order in which
+the nonterminals appear.
+The grammar is embedded in a file that has a preamble and a postamble, which contain
+lines that are copied to the output.
+The preamble may
+also contain [[
+%term grammar-syntax output-syntax
+%term syntax
+%end output-syntax
+]] to describe terminal symbols and output symbols.
+If no output syntax is specified for a terminal, the syntax is null.
+Quoted characters and strings that appear in the grammar are automatically
+introduced as terminals.
+<<*>>=
+record grammar(nonterms, 	# map nonterminal symbol -> right-hand side
+               terms, 		# map terminal symbol (name or string) to output syntax
+	       ntlist, 		# list of nonterminals in order of appearance
+	       start, 		# start symbol
+	       leaves, 		# set of terminals and nonterminals used in productions
+	       preamble, 	# list of pass-throughs
+	       postamble,	# list of pass-throughs
+	       endsyntax)	# syntax for token to follow grammar
+@
+Each production may either be a string (terminal or nonterminal), or a combination 
+of strings using the four operators of EBNF: alternation ([[|]]), closure ([[{...}]]),
+option ({\tt[...]}), and concatenation.
+<<*>>=
+record Alt(list)
+record Clo(node)
+record Opt(node)
+record Cat(list)
+<<*>>=
+procedure readgrammar(file)
+  local lhs, rhs, preamble, postamble, ln, ntlist, leaves, terms, nonterms, endsyntax
+  every preamble | postamble | ntlist := []
+  every leaves := set()	
+  every terms | nonterms := table()
+  endsyntax := "EOF"
+  <<read [[preamble]] from [[file]], adding to [[terms]]>>
+  <<read productions from [[file]], adding to [[nonterms]] and [[leaves]]>>
+  while put(postamble, read(file))
+  return grammar(nonterms, terms, ntlist, start, leaves, preamble, postamble, endsyntax)
+end
+@
+<<read [[preamble]] from [[file]], adding to [[terms]]>>=
+lineno := 0
+while lineno +:= 1 &
+  read(file) ? 
+    if ="%%" & pos(0) then
+      break
+    else if ="%term " then
+      case *(l := split(tab(0))) of {
+        1 | 2   : terms[l[1]] := l[2] | &null
+        default : error("syntax: %term gsyntax [osyntax]")
+      }
+    else if ="%end " then
+      endsyntax := tab(0)
+    else if ="%start " then
+      /start := tab(0) | error("start symbol already set")
+    else if ="#line " then
+      ln := tab(many(&digits)) & tab(many(' \t')) &
+          pos(0) | (="\"" & filename := tab(upto('"')) & ="\"" & pos(0))
+    else
+      put(preamble, tab(0))
+@
+<<read productions from [[file]], adding to [[nonterms]] and [[leaves]]>>=
+lex(file)
+while not (token == ("%%" | EOF)) do {
+  lhs := Ident()
+  expect(":")
+  /start := lhs
+  if /nonterms[lhs] then put(ntlist, lhs)	# maintain list of lhs
+  nonterms[lhs] := Alternate(nonterms[lhs], parserhs(leaves))
+  expect(";")
+}
+<<*>>=
+link ebnfint #
+@ 
+\subsection{The nature of productions}
+@
+Because it's done in more than one place, we provide the procedure 
+[[Alternate]] to combine nodes by alternation:
+<<*>>=
+procedure Alternate(p1, p2)
+  if /p1 then return p2
+  else if type(p1) == type(p2) == "Alt" then return Alt(p1.list|||p2.list)
+  else if type(p1) == "Alt"             then put(p1.list, p2) & return p1
+  else if type(p2) == "Alt"             then put(p2.list, p1) & return p2
+  else return Alt([p1, p2])
+end
+@
+Parsing is straightforward; concatenation has higher precedence than alternation.
+<<*>>=
+procedure parserhs(leaves)
+  p := parsealt(leaves)
+  while gobble("|") do
+    p := Alternate(p, parsealt(leaves))
+  return p
+end
+
+procedure parsealt(leaves)
+  static matcher
+  initial { <<make [[matcher]] match brackets>> }
+  l := []
+  repeat {
+    if x := gobble(!"[({") then {
+      node := parserhs(leaves)
+      gobble(matcher[x]) | error("unmatched " || x)
+      put(l, case x of { 
+               "(" : node 
+               "[" : Opt(node)
+               "{" : Clo(node) 
+          })
+    } else case token of {
+       !"]})|;" : return if *l = 1 then l[1] else Cat(l)
+       IDENT : {insert(leaves, tval); put(l, tval); lex()}
+       "\"" | "'" : {insert(leaves, image(tval)); put(l, image(tval)); lex()}
+       default : error("expected identifier, string, or punctuation")
+    }
+  }
+end
+<<make [[matcher]] match brackets>>=
+matcher := table()
+matcher["["] := "]" ; matcher["("] := ")"; matcher["{"] := "}"
+@
+\subsection{Setting defaults for parts of the grammar}
+\subsection{Miscellany}
+<<*>>=
+procedure split(line)
+  static meta, white, quote, nonmeta
+  initial {
+    white := ' \t'
+    meta := '(){}[]|'
+    quote := '"\''
+    nonmeta := &ascii -- (white ++ meta ++ quote)
+  }
+  l := []
+  line ? {
+    tab(many(white))
+    while not pos(0) do {
+      if put(l, tab(any(meta))) then &null
+      else if delim := tab(any('"\'')) then
+        put(l, delim || tab(find(delim)+1)) | error("unclosed " || delim)
+      else if put(l, tab(many(nonmeta))) then &null
+      else error("this can't happen in scanning")
+      tab(many(white))
+    }
+  }
+  return l
+end

@@ -1,0 +1,15 @@
+\section{Error checking for the grammar}
+<<*>>=
+procedure checkgrammar(g)
+  local defined
+  defined := set()
+  every insert(defined, key(g.nonterms | g.terms))
+  *g.nonterms > 0 | stop("No productions in grammar.")
+  if *(g.leaves -- defined) > 0 then {<<complain about undeclared symbols and stop>>}
+  return g
+end
+<<complain about undeclared symbols and stop>>=
+writes(&errout, "Undeclared symbols:")
+every writes(&errout, " ", !(g.leaves -- defined))
+write(&errout)
+stop()

@@ -1,0 +1,126 @@
+\section{Emitting Icon code}
+<<*>>=
+global ITAB, thisnt
+procedure IconEmitnt(g, nt)
+  initial {
+    ITAB := 4
+    write("link ebnflex")
+  }
+  if \IconReserved then {<<emit [[reserved]]>>; IconReserved := &null}
+  writes("procedure ", thisnt := nt, "()")
+  write(if type(g.nonterms[nt]) ~== "Alt" then 
+              " # " || prodimage(nt[1], g.nonterms[nt]) else "")
+  IconEmitnode(g, g.nonterms[nt], ITAB, 1)
+  iwrite(ITAB, "return")
+  write("end")
+  write()
+end
+
+procedure IconEmitnode(g, node, indent, nobracket)
+  local gobble
+  case type(node) of {
+    "Alt" : 
+      if /g.terms[!node.list] then {	# ordinary case
+        iwrite(indent,   "case token of {")
+        every n := !node.list do {
+          iwrites(indent+ITAB, "")
+          l := sort(predict(n, node))
+          every writes(g.terms[x := !l], if x ~=== l[-1] then " | " else "")
+          writes(" : ")
+          write("# ", 
+                if g.nonterms[l := key(g.nonterms)] === node then prodimage(l, n) 
+                else nodeimage(n))
+          IconEmitnode(g, n, indent+2*ITAB)
+        }
+        iwrite(indent+ITAB, "default : ", icnsyntax(node))
+        iwrite(indent, "}")
+      } else {
+	iwrites(indent, "(gobble(")
+	every writes(g.terms[x := !node.list], if x ~== node.list[-1] then " | " else "")
+	write(") | ", icnsyntax(node), ")")
+      }
+    "Cat" : 
+        if      *node.list = 0 then iwrite(indent, "&null  # epsilon-production")
+        else if *node.list = 1 then IconEmitnode(g, node.list[1], indent)
+        else {
+          if /nobracket then iwrite(indent, "{")
+          every IconEmitnode(g, !node.list, indent + if /nobracket then ITAB else 0)
+          if /nobracket then iwrite(indent, "}")
+        }
+    "Opt" | "Clo" : {
+      if type(node.node) == "Cat" & member(g.terms, node.node.list[1]) then
+        gobble := get(node.node.list)
+      else if member(g.terms, node.node) then
+        { gobble := node.node ; node.node := Cat([]) }
+      else
+        gobble := &null
+      iwrites(indent, if type(node) == "Opt" then "if" else "while", " ")
+      if /gobble then writes("token == ") else writes("gobble(")
+      l := sort(first[node]--epsilonset)
+      if *l = 1 then writes(g.terms[l[1]])
+      else {
+        writes("(")
+        every writes(x := !l, if x ~=== l[-1] then " | " else "")
+        writes(")")
+      }
+      if \gobble then writes(")")
+      writes(" ", if type(node) == "Opt" then "then" else "do")
+      if type(node.node) == "Cat" & *node.node.list > 1 then brack := 1 else brack := &null
+      write(if \brack then " {" else "")
+#     iwrite(indent+ITAB, "# ", nodeimage(node))
+      IconEmitnode(g, node.node, indent+ITAB, 1)
+      iwrite(indent, \brack & "}")
+    }
+    "string" :
+       iwrite(indent, "expect(", \g.terms[node], ", ", image(thisnt), ")") | 
+         iwrite(indent, node, "()")
+    default : error("this can't happen -- error node type")
+  }
+end
+@
+Print different syntax error messages according to the number of alternatives.
+<<*>>=
+link commafy
+procedure icnsyntax(alt)
+  s := set()
+  every s ++:= predict(!alt.list, alt)
+  return case *s of {
+    0 : error("Empty predict set in production for `", thisnt, "'! Can this happen?")
+    1 | 2 | 3 :
+       map("error(#syntax error parsing " || thisnt || ":\\n\\texpected " || 
+           map(commafy(sort(s), "or"), "\"", "'") || "#)", "#", "\"")
+    default : map("error(#syntax error parsing " || thisnt || "#)", "#", "\"")
+  }
+end
+@
+[[iwrite]] and [[iwrites]] are used for indentation.
+@
+<<*>>=
+procedure iwrite(indent, L[])
+  return write!(push(L,left("", indent)))
+end
+
+procedure iwrites(indent, L[])
+  return writes!(push(L,left("", indent)))
+end
+@
+Define nonterminals
+<<*>>=
+global IconReserved
+
+procedure IconStringdef(g)
+  IconReserved := set()
+  every t := key(g.terms) do /g.terms[t] := t
+  every t := !g.leaves & not member(g.nonterms | g.terms, t) do
+    if any('"\'', t[1] == t[-1]) then
+      insert(IconReserved, g.terms[t] := "\"" || t[2:-1] || "\"")
+  return g
+end
+<<emit [[reserved]]>>=
+write("procedure reserved(w)")
+write("  static words")
+write("  initial words := set([")
+every write("    ", !sort(IconReserved), ",")
+write("    ", ?IconReserved, "])")
+write("  if member(words, w) then return w")
+write("end")

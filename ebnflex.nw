@@ -1,0 +1,78 @@
+\section{Generic lexer and error routines for use with EBNF parser generator}
+This lexer expects two external procedures: 
+[[scantokens]] generates all the tokens in the current [[&subject]].
+It exports the following:
+\begin{itemize} 
+\item[\tt lex(file)] 
+reads the next token from file [[file]], setting
+[[token]] and [[tval]]. 
+If [[file]] is omitted, it defaults to the file supplied on the
+previous call to [[lex]], or to [[&input]].
+\item[\tt gobble(t)] 
+is [[if token == t then { lex(); return t }]]
+\item[\tt expect(t)]
+is [[gobble(t) | ]]{\em error message}
+\item[\tt error(...)]
+prints an error message and halts.
+\item[\tt Ident()] returns an identifier from the input stream.
+\item[\tt Int()] returns an integer from the input stream.
+\end{itemize}
+@
+[[token]] describes the category of the token, and [[tval]] is its value.
+[[token == tval]] except for integers and identifiers.
+[[filename]] and [[lineno]] describe the source file and line number from which 
+the token came.
+<<*>>=
+global token, tval, filename, lineno
+global thisline, thispos
+@
+There are a few predefined tokens.
+<<*>>=
+global EOF
+@
+[[lex]] sets the new [[token]] and [[tval]], returning [[token]].
+<<*>>=
+procedure lex(newfile)
+  static toks, infile
+  initial {EOF    := " end of file "; /lineno := 0; toks := [];
+           infile := &input; filename := "standard input"}
+  filename := image(infile := \newfile)[6:-1]
+  while *toks = 0 & thisline := read(infile) do {
+    every put(toks, tokens(thisline)) do 
+      every put(toks, tval | thispos)
+    lineno +:= 1
+  }
+  return if *toks > 0 then {every token | tval | thispos := get(toks); token}
+         else {thisline := "<end of file>"; thispos := 1; token := tval := EOF}
+end
+
+procedure tokens(line)
+  line ? suspend scantokens()
+end
+@
+Many programs will use one of these two procedures much of the time.
+[[gobble]] consumes a token, failing if it is not present.
+[[expect]] consumes a token, printing an error message if it is not present.
+<<*>>=
+procedure gobble(t)
+    if token == t then { lex(); return t }
+end
+
+procedure expect(t, nt)
+    return gobble(t) | 
+    error("when parsing "||\nt||", " | "", 
+          "expected ", image(t), " but found ", image(tval))
+end
+
+procedure lexwhere(outfile)
+  /outfile := &errout
+  write(outfile, thisline)
+  write(outfile, repl(" ", thispos-1), "^", repl(" ", 0 <= *thisline-thispos) | "", "$")
+  return
+end
+
+procedure error(L[])
+  write ! ([&errout, image(filename), ", line ", lineno, ": "] ||| L)
+  lexwhere()
+  stop("token = ", token, " [", image(tval), "]")
+end

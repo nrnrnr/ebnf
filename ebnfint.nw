@@ -1,0 +1,10 @@
+<<*>>=
+procedure Ident(notrequired)
+  return 2(token == IDENT, .tval, lex()) | 
+    if \notrequired then fail else error("identifier expected")
+end
+
+procedure Int(notrequired)
+  return 2(token == INT, .tval, lex()) | 
+    if \notrequired then fail else error("integer expected")
+end

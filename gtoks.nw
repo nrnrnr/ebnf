@@ -1,11 +1,16 @@
 <<*>>=
-global SEMANTICS, IDENT
+global SEMANTICS, IDENT, STARTSEM, ENDSEM
 procedure scantokens()
-  static alphanum, semantics
+  static alphanum, semantics, semmatch
   initial { 
     alphanum := &letters ++ &digits ++ '_'
     SEMANTICS := " semantics "
+    STARTSEM := " start of semantics "
+    ENDSEM := " end of semantics "
     IDENT := " identifier "
+    semmatch := table()
+    semmatch["/."] := "./"
+    semmatch["/*"] := "*/"
   }
   repeat {
     if /semantics then {
@@ -14,8 +19,8 @@ procedure scantokens()
         fail
       } else if any(&letters) & tval := tab(many(alphanum)) then {
         token := IDENT
-      } else if token := ="/." then {
-        tval := semantics := token
+      } else if semantics := tval := =key(semmatch) then {
+        token := STARTSEM
       } else if token := =("'"|"\"") then {
         tval := tab(upto(token)) | error("unclosed ", token)
         move(1)
@@ -27,10 +32,13 @@ procedure scantokens()
       thispos := &pos
       suspend token
     } else {
-      if tval := tab(find("./")) then {
+      if tval := tab(find(semmatch[semantics])) then {
         suspend token := SEMANTICS
-        suspend token := tval := ="./" | stop("impossible")
+        tval := =semmatch[semantics] | stop("impossible")
+        suspend token := ENDSEM
         semantics := &null
+      } else if pos(0) then {
+        fail
       } else {
         tval := tab(0)
         suspend token := SEMANTICS

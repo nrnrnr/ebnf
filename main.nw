@@ -1,11 +1,17 @@
 <<*>>=
+link openfile
+
 procedure main(args)
-  emitter := Cemitnt
-  stringdef := Cstringdef
+  emitter := Icon
   while case args[1] of {
-    "-icn" : { emitter := IconEmitnt; stringdef := IconStringdef }
+    "-flatten" : flatten := args[1]
+    "-parser"  : doparser  := args[1]
+    "-grammar" : dogrammar := args[1]
+    "-icn" : emitter := Icon
+    "-c"   : emitter := C
     default : &fail
   } do get(args)
+  if /doparser & /dogrammar then doparser := 1
   i := 1
   while args[i][1] == "-" do  i +:= 1
   case *args[i:0] of {
@@ -13,6 +19,12 @@ procedure main(args)
     1       : g := readgrammar(open(filename := args[1]))
     default : stop("Usage: EBNF [-d] [file]")
   }
-  stringdef(g)
-  ll1(g, args[1:i], emitter)
+  emitter("stringdef")(g)
+  if \flatten then
+    flattengrammar(g)
+  writegrammar(\dogrammar & &output, g)
+  if \doparser then {
+    emitter("infersemantics")(g)
+    ll1(g, args[1:i], emitter("emit"))
+  }
 end

@@ -1,5 +1,14 @@
 \section{Emitting Icon code}
 <<*>>=
+procedure Icon(what)
+  return case(what) of {
+    "emit"           : IconEmitnt
+    "stringdef"      : IconStringdef
+    "infersemantics" : IconSemantics
+    default : error("Icon doesn't support ", what)
+  }
+end
+<<*>>=
 global ITAB, thisnt
 procedure IconEmitnt(g, nt)
   initial {
@@ -7,75 +16,81 @@ procedure IconEmitnt(g, nt)
     write("link ebnflex")
   }
   if \IconReserved then {<<emit [[reserved]]>>; IconReserved := &null}
-  writes("procedure ", thisnt := nt, "()")
+  write("procedure P_", thisnt := nt, "()")
+  <<write definitions of local variables>>
   write(if type(g.nonterms[nt]) ~== "Alt" then 
               " # " || prodimage(nt[1], g.nonterms[nt]) else "")
-  IconEmitnode(g, g.nonterms[nt], ITAB, 1)
-  iwrite(ITAB, "return")
-  write("end")
-  write()
+  IconEmitnode(g, g.nonterms[nt], ITAB, "return")
+  every write("end" | "")
 end
+<<write definitions of local variables>>=
+n := case type(node := g.nonterms[nt]) of
+  { "Opt" | "Clo" : 1
+    "Cat" : *node.list
+    "Alt" : { k := 0
+              every type(nn := !node.list) == "Cat" do
+                k <:= *nn.list
+              k
+            }
+  }
+l := [] ; every put(l, "ii" || (1 to n))
+write(repl(" ", ITAB), "local ", commaseparate(l))
+<<*>>=
+record closchema(Init, While, Do, Put1, Put2)
 
-procedure IconEmitnode(g, node, indent, nobracket)
-  local gobble
+procedure IconEmitnode(g, node, indent, assignment)
+  local gobble, initindent
+  static schema, fakeline
+  initial {schema := table() 
+           schema["Clo"] := closchema("ii1 := []", "while", "do", "put(ii1, ", ")")
+           schema["Opt"] := closchema("ii1 := &null", "if", "then", "ii1 := (", ")")
+           fakeline := create(seq(1000, 1000))
+          }
+  if type(node) ~== "Alt" then iwrites(indent, \assignment, " ")
+  initindent := if /assignment then indent else 0
   case type(node) of {
     "Alt" : 
       if /g.terms[!node.list] then {	# ordinary case
         iwrite(indent,   "case token of {")
         every n := !node.list do {
-          iwrites(indent+ITAB, "")
-          l := sort(predict(n, node))
-          every writes(g.terms[x := !l], if x ~=== l[-1] then " | " else "")
-          writes(" : ")
+          iwrites(indent+ITAB, alternate_terms(g, sort(predict(n, node))), " : ")
           write("# ", 
                 if g.nonterms[l := key(g.nonterms)] === node then prodimage(l, n) 
                 else nodeimage(n))
-          IconEmitnode(g, n, indent+2*ITAB)
+          IconEmitnode(g, n, indent+2*ITAB, assignment)
         }
         iwrite(indent+ITAB, "default : ", icnsyntax(node))
         iwrite(indent, "}")
       } else {
-	iwrites(indent, "(gobble(")
-	every writes(g.terms[x := !node.list], if x ~== node.list[-1] then " | " else "")
-	write(") | ", icnsyntax(node), ")")
+	iwrite(indent, \assignment || " " | "", 
+               "(gobble(", alternate_terms(g, node.list), ") | ", icnsyntax(node), ")")
       }
-    "Cat" : 
-        if      *node.list = 0 then iwrite(indent, "&null  # epsilon-production")
-        else if *node.list = 1 then IconEmitnode(g, node.list[1], indent)
-        else {
-          if /nobracket then iwrite(indent, "{")
-          every IconEmitnode(g, !node.list, indent + if /nobracket then ITAB else 0)
-          if /nobracket then iwrite(indent, "}")
+    "Cat" : {
+        iwrite(initindent, "{")
+        every IconEmitnode(g, node.list[i := 1 to *node.list], indent + ITAB,
+                           "ii" || i || " := ")
+#        write("#line ", \node.position)   # doesn't work! (wrong line reported)
+        every iwrite(indent, !\node.semantics)
+#        write("#line ", \node.position & @fakeline, image("generated code"))
+        iwrite(indent, "}")
         }
     "Opt" | "Clo" : {
-      if type(node.node) == "Cat" & member(g.terms, node.node.list[1]) then
-        gobble := get(node.node.list)
-      else if member(g.terms, node.node) then
-        { gobble := node.node ; node.node := Cat([]) }
-      else
-        gobble := &null
-      iwrites(indent, if type(node) == "Opt" then "if" else "while", " ")
-      if /gobble then writes("token == ") else writes("gobble(")
-      l := sort(first[node]--epsilonset)
-      if *l = 1 then writes(g.terms[l[1]])
-      else {
-        writes("(")
-        every writes(x := !l, if x ~=== l[-1] then " | " else "")
-        writes(")")
-      }
-      if \gobble then writes(")")
-      writes(" ", if type(node) == "Opt" then "then" else "do")
-      if type(node.node) == "Cat" & *node.node.list > 1 then brack := 1 else brack := &null
-      write(if \brack then " {" else "")
-#     iwrite(indent+ITAB, "# ", nodeimage(node))
-      IconEmitnode(g, node.node, indent+ITAB, 1)
-      iwrite(indent, \brack & "}")
+      sch := schema[type(node)]
+      iwrite(initindent, "{")
+      iwrite(indent+ITAB, sch.Init)
+      iwrite(indent+ITAB, sch.While, " token == (", 
+             alternate_terms(g, sort(first[node]--epsilonset)), ") ", sch.Do)
+      IconEmitnode(g, node.node, indent+2*ITAB, sch.Put1)
+      iwrite(indent+2*ITAB, sch.Put2)
+      iwrite(indent+ITAB, "ii1")
+      iwrite(indent, "}")
     }
-    "string" :
-       iwrite(indent, "expect(", \g.terms[node], ", ", image(thisnt), ")") | 
-         iwrite(indent, node, "()")
+    "string" : 
+       iwrite(initindent, "expect(", \g.terms[node], ", ", image(thisnt), ")") | 
+         iwrite(initindent, "P_", node, "()")
     default : error("this can't happen -- error node type")
   }
+  return
 end
 @
 Print different syntax error messages according to the number of alternatives.
@@ -124,3 +139,44 @@ every write("    ", !sort(IconReserved), ",")
 write("    ", ?IconReserved, "])")
 write("  if member(words, w) then return w")
 write("end")
+<<*>>=
+procedure alternate_terms(g, l)
+  s := ""
+  every s ||:= " | " || g.terms[!l]
+  return s[4:0]
+end
+
+<<*>>=
+procedure IconSemantics(g)
+  every Idosem(g, !g.nonterms)
+  return
+end
+
+procedure Idosem(g, node)
+  case type(node) of {
+    "Opt" | "Clo" : Idosem(g, node.node)
+    "Alt" : every Idosem(g, !node.list)
+    "Cat" : {
+       every Idosem(g, !node.list)
+       /node.semantics :=
+         [case *node.list of {
+            0 : "&null"
+            1 : "ii1"
+            default : {
+              l := []
+              every put(l, 1(i := 1 to *node.list, not member(g.terms, node.list[i])))
+              if *l = 1 then
+                "ii" || l[1]
+              else {
+                s := "["
+                every s ||:= "ii" || (1 to *node.list) || ", "
+                s[1:-2] || "]"
+              }
+            }
+          }
+         ]
+       }
+    "string" : &fail
+    default  : error("impossible node type")
+  }
+end

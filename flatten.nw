@@ -1,0 +1,54 @@
+\section{Flatting a grammar}
+[[flattengrammar]] introduces enough new nonterminals to put the grammar in
+a form in which:
+\begin{itemize}
+\item The child of every while or optional node is a nonterminal.
+\item Every child of every cat node is a terminal or a nontermal.
+\end{itemize}
+This flattening simplifies the use of semantic actions, and it also is
+a first step toward emitting a yacc grammar.
+@
+<<*>>=
+procedure flattengrammar(g)
+  work := []
+  every lhs := !g.ntlist do
+    every put(work, lhs | g.nonterms[lhs])
+  while flattenpair(g, work, get(work), get(work))
+  return g
+end
+<<*>>=
+procedure flattenpair(g, work, lhs, node)
+  static epsilon
+  initial { epsilon := Cat([]) }
+  case type(node) of {
+    "Opt" | "Clo" : 
+            if not member(g.nonterms, node.node) then 
+              node.node := cutnode(g, work, lhs, node.node)
+    "Cat" : every n := node.list[i := 1 to *node.list] &
+                  not member(g.nonterms | g.terms, n) do 
+                    node.list[i] := cutnode(g, work, lhs, n) 
+    "Alt" : every n := node.list[i := 1 to *node.list] do
+              if type(n) == "Cat" then
+                flattenpair(g, work, lhs, n)
+              else if not member(g.nonterms | g.terms, n) then
+                node.list[i] := cutnode(g, work, lhs, n) 
+    "string" : &null
+    default  : error("impossible node type")
+  }
+  return
+end
+
+procedure cutnode(g, work, lhs, node)
+  g.nonterms[s := gensym(lhs)] := node
+  put(g.ntlist, s)
+  every put(work, s | node)
+  return s
+end
+<<*>>=
+procedure gensym(id)
+  static syms
+  initial syms := table()
+  /id = "XX"
+  /syms[id] := create(seq())
+  return id || "_" || @ syms[id]
+end

@@ -3,8 +3,8 @@
 global epsilon, epsilonset, endmarker, debugging, emitnt, reservedfile
 
 procedure ll1(g, argv, emit)
-  epsilon    := "%Epsilon%"
-  endmarker  := "%End%"
+  epsilon    := " %Epsilon% "
+  endmarker  := " %End% "
   epsilonset := set([epsilon])
   ntlist     := g.ntlist		# nonterms in order of appearance
   while case argv[1] of {
@@ -142,7 +142,7 @@ procedure predict(node, parent)
 end
 <<*>>=
 procedure emitcode(g, ntlist, emitter)
-  g.terms[endmarker] := endsyntax
+  g.terms[endmarker] := g.endsyntax
   every emitter(g, !ntlist)
   delete(g.terms, endmarker)
 end

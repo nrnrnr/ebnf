@@ -1,0 +1,37 @@
+<<*>>=
+procedure writegrammar(outfile, g)
+  every writes(outfile, lhs := !g.ntlist, " : ") do
+    case type(rhs := g.nonterms[lhs]) of {
+      "Opt" | "Clo" | "Cat" | "string" : 
+              { writes(outfile, nodepix(g, rhs)); write(outfile, ";") }
+      "Alt" : { write(outfile, nodepix(g, rhs, s := "\n " || repl(" ", *lhs)))
+                write(outfile, s[2:0], ";") }
+      default : error("impossible node type")
+    }
+  return g
+end
+
+procedure nodepix(g, node, separator)
+  return case type(node) of {
+    "Opt" : "[" || nodepix(g, node.node) || "]"
+    "Clo" : "{" || nodepix(g, node.node) || "}"
+    "Cat" : {
+       s := ""
+       every s ||:= nodepix(g, !node.list, node) || " "
+       if \node.semantics then
+         s || "/* " || commaseparate(node.semantics, "\n") || " */"
+       else 
+         s[1:-1]
+     }
+    "Alt" : {
+       s := ""
+       sep := if type(separator) == "string" then separator else " "
+       every s ||:= sep || "| " || nodepix(g, !node.list)
+       s := s[*sep+3:0]
+       if type(separator) == "Cat" then "(" || s || ")" else s
+     }
+    "string" : \g.terms[node] | node
+    default  : error("impossible node type")
+  }
+end
+

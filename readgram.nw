@@ -30,7 +30,7 @@ option ({\tt[...]}), and concatenation.
 record Alt(list)
 record Clo(node)
 record Opt(node)
-record Cat(list)
+record Cat(list, semantics, position)
 <<*>>=
 procedure readgrammar(file)
   local lhs, rhs, preamble, postamble, ln, ntlist, leaves, terms, nonterms, endsyntax
@@ -114,6 +114,7 @@ procedure parsealt(leaves)
                "{" : Clo(node) 
           })
     } else case token of {
+       STARTSEM : {<<parse semantics and return [[Cat]] node of [[l]]>>}
        !"]})|;" : return if *l = 1 then l[1] else Cat(l)
        IDENT : {insert(leaves, tval); put(l, tval); lex()}
        "\"" | "'" : {insert(leaves, image(tval)); put(l, image(tval)); lex()}
@@ -121,6 +122,15 @@ procedure parsealt(leaves)
     }
   }
 end
+<<parse semantics and return [[Cat]] node of [[l]]>>=
+s := []
+p := lineno || " " || image(filename)
+lex()
+while put(s, token == SEMANTICS & .tval) do lex()
+expect(ENDSEM)
+token == !"]})|;" | 
+   error("expected closing bracket, bar, or semicolon after semantics")
+return Cat(l, s, p)
 <<make [[matcher]] match brackets>>=
 matcher := table()
 matcher["["] := "]" ; matcher["("] := ")"; matcher["{"] := "}"

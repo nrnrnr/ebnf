@@ -1,3 +1,4 @@
+% -*- mode: Noweb; noweb-code-mode: icon-mode -*-
 \section{Emitting ML code}
 <<*>>=
 procedure ML(what)
@@ -23,9 +24,11 @@ procedure MLResynch(pos)
 end
 <<*>>=
 procedure MLEmitPreamble(g)
+  local parser
+  parser := (\g.attributes["parser"])[1] | "Parser"
   <<emit [[ii.tab.sml]] file>>
 every write(
-"structure Parser = struct" |
+"structure " || parser || " = struct" |
 "  datatype 'a stream = STREAM of unit -> 'a * 'a stream" |
 "  fun invoke (STREAM lex) = lex()" |
 "  " |
@@ -34,16 +37,9 @@ every write(
 "  exception SyntaxError of {parsing:string, msg:string list, found:token}" |
 "  exception Expected of {expected:string, found:token, parsing:string option} " |
 "	   (* token expected, nonterminal being parsed *)" |
-"  exception PrematureEOF " |
 "  ")
- if \g.attributes["arg-pat"] then {
-   writes("fun mk_parser (")
-   every write(!g.attributes["arg-pat"])
-   write(") =")
- } else
-   write("val parser =")
 every write(
-"let" |
+"local" |
 "  open Token" |
 "  " |
 "  exception TokenMismatch of string" |
@@ -76,7 +72,8 @@ every write(
 "  " |
 "  fun make_parser (f, unEOF) stream =" |
 "    let val (result, (token, lex)) = f (invoke stream)" |
-"    in  (unEOF token; result) handle TokenMismatch _ => raise PrematureEOF" |
+"    in  (unEOF token; result) handle TokenMismatch _ => " |
+"          raise Expected {expected=\"end of file\", found=token, parsing=NONE} " |
 "    end" |
 "  " |
 "")
@@ -89,8 +86,14 @@ end
 procedure MLEmitPostamble(g)
   default_emit_postamble(g, ML)
   write("in")
+  if \g.attributes["arg-pat"] then {
+    writes("  fun mk_parser (")
+    every write(!g.attributes["arg-pat"])
+    write(") =")
+  } else
+    write("  val parser =")
   write("  make_parser(P_", g.start, ", unEOF)")
-  write("end (*parser or mk_parser*)")
+  write("end (*local*)")
   write("end (* Parser *)")
   return
 end
@@ -107,13 +110,14 @@ procedure MLEmitnt(g, nt)
   fun := "and"
   write(if type(g.nonterms[nt]) ~== "Alt" then 
               " # " || prodimage(nt[1], g.nonterms[nt]) else "")
-  MLEmitnode(g, g.nonterms[nt], ITAB)
+  MLEmitnode(g, nt, g.nonterms[nt], ITAB)
 end
 <<emit [[ii.tab.sml]] file>>=
 outfile := open("ii.tab.sml", "w") | stop("can't open ii.tab.sml")
 write(outfile, "signature TOKEN = sig")
 emit_ml_token_datatype(outfile, g)
-write(outfile, "val reserved : string -> token option")
+write(outfile, "val reserved   : string -> token option")
+write(outfile, "val unReserved : token  -> string option")
 write(outfile, "end")
 
 write(outfile, "structure Token : TOKEN = struct")
@@ -136,7 +140,7 @@ write("    | unEOF _ = raise TokenMismatch \"end of file\"")
 write()
 @
 <<*>>=
-procedure MLEmitnode(g, node, indent, assignment)
+procedure MLEmitnode(g, nt, node, indent, assignment)
   local initindent, ofword
   static fakeline
   initial {fakeline := create(seq(1000, 1000))
@@ -151,7 +155,7 @@ procedure MLEmitnode(g, node, indent, assignment)
           write("(* ", 
                 if g.nonterms[l := key(g.nonterms)] === node then prodimage(l, n) 
                 else nodeimage(n), " *)")
-          MLEmitnode(g, n, indent+2*ITAB, assignment)
+          MLEmitnode(g, nt, n, indent+2*ITAB, assignment)
         }
         iwrite(indent, assignment, "in")
         iwrite(indent+ITAB, assignment, "case token")
@@ -167,7 +171,7 @@ procedure MLEmitnode(g, node, indent, assignment)
       }
     "Cat" : {
         iwrite(indent, "let")
-        every MLEmitnode(g, node.list[i := 1 to *node.list], indent + ITAB,
+        every MLEmitnode(g, nt, node.list[i := 1 to *node.list], indent + ITAB,
                            "val (ii" || i || ", (token, lex)) = ")
 
         iwrite(indent+ITAB, "val result = (")
@@ -175,7 +179,9 @@ procedure MLEmitnode(g, node, indent, assignment)
         every iwrite(indent+ITAB, !\node.semantics)
         write("(*#line ", \node.position & @fakeline, image("generated code"), "*)")
         iwrite(indent+ITAB, ")")
-        iwrite(indent, "in  (result, (token, lex))")
+        iwrite(indent,   "in  (result, (token, lex))")
+        if \g.attributes["trace"] then
+          iwrite(indent, "    before print ", image("reduced " || nt || "\n"))
         iwrite(indent, "end")
         }
     "Opt" | "Clo" : {
@@ -188,7 +194,7 @@ procedure MLEmitnode(g, node, indent, assignment)
       }
       iwrite(indent+ITAB, fn, " _ => false),")
       iwrite(indent, "(fn (token, lex) => ")
-      MLEmitnode(g, node.node, indent+2*ITAB)
+      MLEmitnode(g, nt, node.node, indent+2*ITAB)
       iwrite(indent+ITAB, ")))")
     }
     "string" : 
@@ -242,6 +248,16 @@ procedure emit_ml_reserved(outfile, g)
   }    
   write(outfile, nprefix, " _ = NONE")
   write(outfile)
+
+  prefix  := "fun unReserved "
+  nprefix := "  | unReserved "
+  every t := !sort(MLReserved) do {
+    write(outfile, prefix, g.terms[t], " = SOME ", t)
+    prefix := nprefix
+  }    
+  write(outfile, nprefix, " _ = NONE")
+  write(outfile)
+
   return g
 end
 <<*>>=
@@ -380,8 +396,8 @@ fun optional((token, lex), predicate, parse) =
    else 
      (NONE, (token, lex))
 
-exception PrematureEOF 
+exception LeftoverTokens of token stream
 fun make_parser (f, unEOF) stream =
   let val (result, (token, lex)) = f (invoke stream)
-  in  (unEOF token; result) handle TokenMismatch _ => raise PrematureEOF
+  in  (unEOF token; result) handle TokenMismatch _ => raise LeftoverTokens stream
   end

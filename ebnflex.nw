@@ -32,6 +32,7 @@ global EOF
 @
 [[lex]] sets the new [[token]] and [[tval]], returning [[token]].
 <<*>>=
+global pass_through_resynch
 procedure lex(newfile)
   static toks,  infile
   local eol
@@ -53,9 +54,9 @@ procedure lex(newfile)
       lineno +:= 1
       thispos := 1
       thisline ?    
-        if (="#line ", lineno := integer(tab(many(&digits)))-1, 
+        if (="#line ", /pass_through_resynch, lineno := integer(tab(many(&digits)))-1, 
             =" \"", filename := tab(upto('"')), ="\"", pos(0)) |
-           (="<* LINE ", lineno := integer(tab(many(&digits)))-1, 
+           (="<* LINE ", /pass_through_resynch, lineno :=integer(tab(many(&digits)))-1,
             =" \"", filename := tab(upto('"')), ="\" *>", pos(0)) then { }
         else {
           if token := scantokens() then {
@@ -85,7 +86,7 @@ end
 procedure lexwhere(outfile)
   /outfile := &errout
   write(outfile, thisline)
-  write(outfile, repl(" ", thispos-1), "^", repl(" ", 0 <= *thisline-thispos) | "", "$")
+  write(outfile, repl(" ", \thispos-1), "^", repl(" ", 0 <= *thisline-thispos) | "", "$")
   return
 end
 

@@ -1,0 +1,18 @@
+<<*>>=
+global tick_inc, tick_last
+
+procedure start_ticking(limit, nticks, msg)
+  tick_inc := 1 + limit / nticks
+  tick_last := 0
+  writes(&errout, \msg)
+  return
+end
+
+procedure tick_to(i)
+  while tick_last < i do {
+    writes(&errout, ".")
+    tick_last +:= tick_inc
+  }
+  return
+end
+

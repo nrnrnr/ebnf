@@ -22,7 +22,9 @@ record grammar(nonterms, 	# map nonterminal symbol -> right-hand side
 	       preamble, 	# list of pass-throughs
 	       postamble,	# list of pass-throughs
 	       endsyntax,	# syntax for token to follow grammar
-               externalnts)	# nonterminals for which external parsers are supplied
+               externalnts,	# nonterminals for which external parsers are supplied
+               prec,		# precedence of terminals
+               assoc)		# associativity of terminals
 @
 Each production may either be a string (terminal or nonterminal), or a combination 
 of strings using the four operators of EBNF: alternation ([[|]]), closure ([[{...}]]),
@@ -31,30 +33,34 @@ option ({\tt[...]}), and concatenation.
 record Alt(list)
 record Clo(node)
 record Opt(node)
-record Cat(list, semantics, position)
+record Cat(list, semantics, precterm, position)
+			# precterm, if not null, defines precedence & associativity
+			# position is source-code location
 <<*>>=
 procedure readgrammar(file)
-  local lhs, rhs, preamble, postamble, ln, ntlist, leaves, terms, nonterms, endsyntax
+  local lhs, rhs, preamble, postamble, ntlist, leaves, terms, nonterms, endsyntax,
+        prec, assoc, nextprec
   every preamble | postamble | ntlist := []
   every leaves | externalnts := set()	
-  every terms | nonterms := table()
+  every terms | nonterms | prec | assoc := table()
   endsyntax := "EOF"
+  nextprec := 1
   <<read [[preamble]] from [[file]], adding to [[terms]]>>
   <<read productions from [[file]], adding to [[nonterms]] and [[leaves]]>>
   while put(postamble, read(file))
   return grammar(nonterms, terms, ntlist, start, leaves, preamble, postamble, endsyntax,
-                 externalnts)
+                 externalnts, prec, assoc)
 end
 @
 <<read [[preamble]] from [[file]], adding to [[terms]]>>=
 lineno := 0
 while lineno +:= 1 &
-  read(file) ? 
+  thisline := read(file) ? 
     if ="%%" & pos(0) then
       break
     else if ="%term " then
       case *(l := split(tab(0))) of {
-        1 | 2   : terms[l[1]] := l[2] | &null
+        1 | 2   : {<<add terminal [[l[1]]] with syntax [[l[2] | &null]]>>}
         default : error("syntax: %term gsyntax [osyntax]")
       }
     else if ="%end " then
@@ -64,19 +70,42 @@ while lineno +:= 1 &
     else if ="%external " then
       insert(externalnts, tab(0))
     else if ="#line " then
-      ln := tab(many(&digits)) & tab(many(' \t')) &
+      lineno := tab(many(&digits)) - 1 & tab(many(' \t')) &
           pos(0) | (="\"" & filename := tab(upto('"')) & ="\"" & pos(0))
+    else if ="%" & ass := =("left"|"right"|"nonassoc") & tab(many(' \t')) then
+      {<<new precedence class>>}
     else
       put(preamble, tab(0))
+<<add terminal [[l[1]]] with syntax [[l[2] | &null]]>>=
+if member(terms, l[1]) then error(l[1], " is already a terminal symbol")
+if \nonterms[l[1]] then error(l[1], " is already a nonterminal symbol")
+terms[l[1]] := l[2] | &null
+<<new precedence class>>=
+while case scantokens() of {
+  IDENT : {
+    if not member(terms, tval) then {
+      l := [tval]; <<add terminal [[l[1]]] with syntax [[l[2] | &null]]>>
+    }
+    prec[tval] := nextprec;
+    assoc[tval] := ass;
+  }
+  "\"" | "'" : {
+    prec[image(tval)] := nextprec;
+    assoc[image(tval)] := ass;
+  }
+  default : error("identifier or terminal literal expected")
+}
+nextprec +:= 1
 @
 <<read productions from [[file]], adding to [[nonterms]] and [[leaves]]>>=
 lex(file)
 while not (token == ("%%" | EOF)) do {
   lhs := Ident()
   expect(":")
+  if member(terms, lhs) then error(lhs, " is already a terminal symbol")
   /start := lhs
   if /nonterms[lhs] then put(ntlist, lhs)	# maintain list of lhs
-  nonterms[lhs] := Alternate(nonterms[lhs], parserhs(leaves))
+  nonterms[lhs] := Alternate(nonterms[lhs], parserhs(leaves, terms))
   expect(";")
 }
 <<*>>=
@@ -97,20 +126,21 @@ end
 @
 Parsing is straightforward; concatenation has higher precedence than alternation.
 <<*>>=
-procedure parserhs(leaves)
-  p := parsealt(leaves)
+procedure parserhs(leaves, terms)
+  p := parsealt(leaves, terms)
   while gobble("|") do
-    p := Alternate(p, parsealt(leaves))
+    p := Alternate(p, parsealt(leaves, terms))
   return p
 end
 
-procedure parsealt(leaves)
+procedure parsealt(leaves, terms)
+  local precterm
   static matcher
   initial { <<make [[matcher]] match brackets>> }
   l := []
   repeat {
     if x := gobble(!"[({") then {
-      node := parserhs(leaves)
+      node := parserhs(leaves, terms)
       gobble(matcher[x]) | error("unmatched " || x)
       put(l, case x of { 
                "(" : node 
@@ -118,11 +148,30 @@ procedure parsealt(leaves)
                "{" : Clo(node) 
           })
     } else case token of {
+       "%"  : {lex()
+               <<eat [["prec"]]>>
+               case token of {
+                 IDENT : if member(terms, tval) then precterm := tval 
+                         else error(image(tval), " is not a terminal symbol")
+                 "\"" | "'" : precterm := image(tval)
+                 default : error("expected terminal symbol (or literal)")
+               }
+               lex()
+              }
        STARTSEM : {<<parse semantics and return [[Cat]] node of [[l]]>>}
-       !"]})|;" : return if *l = 1 then l[1] else Cat(l)
-       IDENT : {insert(leaves, tval); put(l, tval); lex()}
-       "\"" | "'" : {insert(leaves, image(tval)); put(l, image(tval)); lex()}
-       default : error("expected identifier, string, or punctuation")
+       !"]})|;" : return if *l = 1 & /precterm then l[1] 
+                         else Cat(l, &null, precterm, lineno || " " || image(filename))
+       IDENT    : {insert(leaves, tval)
+                   put(l, tval)
+                   if member(terms, tval) then precterm := tval
+                   lex()
+                  }
+       "\"" | "'" : {insert(leaves, image(tval))
+                     put(l, image(tval))
+		     precterm := image(tval)
+                     lex()
+                    }
+       default : error("expected identifier, literal terminal, or punctuation")
     }
   }
 end
@@ -134,10 +183,15 @@ while put(s, token == SEMANTICS & .tval) do lex()
 expect(ENDSEM)
 token == !"]})|;" | 
    error("expected closing bracket, bar, or semicolon after semantics")
-return Cat(l, s, p)
+return Cat(l, s, precterm, p)
 <<make [[matcher]] match brackets>>=
 matcher := table()
 matcher["["] := "]" ; matcher["("] := ")"; matcher["{"] := "}"
+<<eat [["prec"]]>>=
+if token == IDENT & tval == "prec" then
+  lex()
+else
+  error("%prec expected")
 @
 \subsection{Setting defaults for parts of the grammar}
 \subsection{Miscellany}

@@ -1,13 +1,13 @@
 \section{SLR(1) parser construction}
 <<*>>=
-global accept, epsilon, epsilonset, endmarker, debugging, emitnt, reservedfile
+global accept, epsilon, epsilonset, endmarker
 
-record item(nt, dotpos, list, semantics, prec, assoc, uniqueid)
+record item(nt, dotpos, cat, uniqueid)
 
 <<*>>=
 procedure slr1(g, argv, emit)
   epsilon     := " %Epsilon% "
-  endmarker   := " %End% "
+  endmarker   := "end of file"
   epsilonset  := set([epsilon])
   accept      := " %Accept% "
   g.nonterms[accept] := Cat([g.start, endmarker])		# augment re. p110
@@ -20,13 +20,15 @@ procedure slr1(g, argv, emit)
   compute_follow(g)
   g.start := ostart
   pushtrace("LALR")
-  I0 := set([newitem(accept, 1, [g.start])])
+  I0 := set([newitem(accept, 1, g.nonterms[accept])])
   newitemset(closure(g, I0))
   extend(g)
   lrdiag(f := if !argv == "-d" then open("i.output", "w"), g) & close(f)
 #  every p := !sort(itemtab) do write(p[1], ": ", itemimage(p[2]))
   every write(!g.preamble)
+  resetconflicts()
   emit(g)
+  summarizeconflicts(&errout, g)
   every write(!g.postamble)
   poptrace()
 end
@@ -41,10 +43,8 @@ procedure closure(g, items)
   while i := get(l) do 
     if not member(closed, i) then {
       insert(closed, i)
-      every cat := genrhs(g, i.list[i.dotpos]) do
-        put(l, newitem(i.list[i.dotpos], 1, cat.list, cat.semantics,
-                       g.prec [\cat.precterm] | &null, 
-                       g.assoc[\cat.precterm] | &null))
+      every cat := genrhs(g, i.cat.list[i.dotpos]) do
+        put(l, newitem(i.cat.list[i.dotpos], 1, cat))
     }
   return closed
 end
@@ -62,11 +62,17 @@ procedure genrhs(g, lhs)
   }
 end
 <<*>>=
-procedure itemimage(i)
-  l := ["[", i.nt,"->"] ||| i.list[1:i.dotpos] ||| ["."] ||| i.list[i.dotpos:0] ||| ["]"]
-  put(l, "(" || \i.assoc || " " || \i.prec || ")")
+procedure itemimage(it)
+  l := ["[", it.nt,"->"] ||| it.cat.list[1:it.dotpos] ||| ["."] ||| 
+                             it.cat.list[it.dotpos:0] ||| ["]"]
+  <<add precedence from [[it]] to [[l]] if needed>>
   return commaseparate(l, " ")
 end
+<<add precedence from [[it]] to [[l]] if needed>>=
+lp := &null
+any('"\'', lp := string(it.cat.list[*it.cat.list to 1 by -1]))
+/lp := it.cat.precterm
+put(l, "(%prec " || (\lp ~== \it.cat.precterm) || ")")
 <<*>>=
 procedure itemsetimage(s)
   l := []
@@ -76,19 +82,18 @@ end
 <<*>>=
 procedure addsym(g, Vg, X)
   l := []
-  every i := !Vg & i.list[i.dotpos] == X do 
-    put(l, newitem(i.nt, i.dotpos+1, i.list, i.semantics, i.prec, i.assoc))
+  every i := !Vg & i.cat.list[i.dotpos] == X do 
+    put(l, newitem(i.nt, i.dotpos+1, i.cat))
   return closure(g, l)
 end
 <<*>>=
 global itemtab
 
-procedure newitem(nt, dotpos, list, semantics, prec, assoc)
+procedure newitem(nt, dotpos, cat)
   static cache, uid
   initial { cache := table() ; uid := create(seq()); itemtab := table() }
-  s := nt || " " || dotpos || " " || (\prec | "-") || (\assoc | "") || 
-       commaseparate(list)
-  if /cache[s] := item(nt, dotpos, list, semantics, prec, assoc, n := @uid) then
+  s := nt || " " || image(cat) || " " || dotpos
+  if /cache[s] := item(nt, dotpos, cat, n := @uid) then
     itemtab[n] := cache[s]
   return cache[s]
 end
@@ -121,7 +126,7 @@ procedure extend(g)
   i := 1
   writes(&errout, "Computing LR(0) items...")
   while i <= *itemsetlist do {
-    every it := !(I := itemsetlist[i]) & X := it.list[it.dotpos] do
+    every it := !(I := itemsetlist[i]) & X := it.cat.list[it.dotpos] do
       addgoto(I, X, newitemset(addsym(g, I, X)))
     i +:= 1
   }
@@ -130,28 +135,31 @@ end
 @
 \subsection{Constructing the parsing action and goto tables}
 <<*>>=
-global srconflictcount, rrconflictcount
-global reduceditems
-
-procedure resetconflicts()
-  srconflictcount := rrconflictcount := 0
-  reduceditems := set()
-end
-
-procedure actions(g, I, silent)
+procedure actions(g, I, logconflict)
   t := table()
+  <<let [[n]] be the number of completed items in [[I]]>>
   every it := !I do
-    if member(g.terms, a := it.list[it.dotpos]) then {
-      addaction(g, t, g.terms[a], [it, "shift", goto[I][a]], silent)
-    } else if it.dotpos = *it.list + 1 then {
+    if member(g.terms, a := it.cat.list[it.dotpos]) then {
+      addaction(g, t, a, [it, "shift", goto[I][a]], logconflict)
+    } else if it.dotpos = *it.cat.list + 1 then {
       if it.nt == accept then
-        addaction(g, t, g.endsyntax, [it, "accept"], silent)
-      else
-        every addaction(g, t, g.terms[!follow[it.nt]], [it, "reduce", it], silent)
-    }
-  if not ((!t)[2] == "reduce") then t[0] := [&null, "error"]
+        addaction(g, t, endmarker, [it, "accept"], logconflict)
+      else # try optimization
+        if n > 1 then
+          A := [it, "reduce", it] & every addaction(g, t, !follow[it.nt], A, logconflict)
+        else # optimize
+          addaction(g, t, 0, [it, "reduce", it], logconflict)
+  }
+  if A := \t[0] then # detect possible conflict with reduction
+    every \t[term := !follow[A[3].nt]] do
+      addaction(g, t, term, A, logconflict)
+  else  
+    t[0] := [&null, "error", expectedtokens(t, g, I)]
   return t
 end
+<<let [[n]] be the number of completed items in [[I]]>>=
+n := 0
+every it := !I & it.dotpos = *it.cat.list + 1 do n +:= 1
 <<*>>=
 procedure sameaction(a1, a2)
   return case a1[2] == a2[2] of {
@@ -160,82 +168,156 @@ procedure sameaction(a1, a2)
   }
 end
 <<*>>=
-procedure actionlists(g, I)
-  t := table()
-  every it := !I do
-    if member(g.terms, a := it.list[it.dotpos]) then {
-      appaction(t, g.terms[a], [it, "shift", goto[I][a]])
-    } else if it.dotpos = *it.list + 1 then {
-      if it.nt == accept then
-        appaction(t, g.endsyntax, [it, "accept"])
-      else
-        every appaction(t, g.terms[!follow[it.nt]], [it, "reduce", it])
-    }
-  if not ((!!t)[2] == "reduce") then t[0] := [[&null, "error"]]
-  return t
-end
-<<*>>=
-procedure appaction(t, term, action)
-  /t[term] := []
-  sameaction(!t[term], action) | put(t[term], action)
-end
-<<*>>=
-procedure addaction(g, t, term, action, silent)
+procedure addaction(g, t, term, action, logconflict)
+  local sprec, rprec
+  savereduce(case action[2] of {
+    "reduce" : action[3]
+    "accept" : action[1]
+  })
   (/t[term] := action) | sameaction(t[term], action) | {
     s := (a := t[term] | action, a[2] == "shift", a)
     r := (a := t[term] | action, a[2] == "reduce", a)
     <<if possible, disambiguate [[s]] and [[r]] and return>>
-    if /silent then <<print message about conflict>>
+    /logconflict := countconflict
+    logconflict(\s, \r, term) | logconflict(t[term], action, term)
     if \s & \r then t[term] := s
   }
 end
 <<if possible, disambiguate [[s]] and [[r]] and return>>=
-if \s & \r & \s[1].prec & \r[1].prec then {
-  if      s[1].prec > r[1].prec then t[term] := s
-  else if s[1].prec < r[1].prec then t[term] := r
-  else case s[1].assoc == r[1].assoc of {
+if \s & \r & 
+   sprec  := \g.prec [term] & 
+   rprec  := \g.prec [\r[1].cat.precterm] then {
+  if      sprec > rprec then t[term] := s
+  else if sprec < rprec then t[term] := r
+  else case g.assoc[term] == g.assoc[r[1].cat.precterm] of {
     "left"  : t[term] := r
     "right" : t[term] := s
-    "nonassoc" : t[term] := [&null, "error"]
+    "nonassoc" : t[term] := [&null, "error", 
+       (if term ~== r[1].cat.precterm then term || " and " || r[1].cat.precterm || " are"
+       else term || " is") || " not associative"]
     default : impossible("precedence")
   } | impossible("precedence mismatch")
   return
 }
-<<print message about conflict>>=
-if \s & \r then {
-  write(&errout, "shift/reduce conflict on ", term, ":")
-  every write(&errout, "\t", itemimage((s|r)[1]))
-} else {
-  write(&errout, "\n", action[2], "/", t[term][2], " conflict on ", term, ":")
-  every write(&errout, "\t", itemimage((action|t[term])[1]))
-}
+<<*>>=
+procedure expectedtokens(t, g, I)
+  local primarynts, ntterms, tterms
+  primarynts := set()
+  every it := !I & nt := it.cat.list[1 ~= it.dotpos] & member(g.nonterms, nt) do
+    insert(primarynts, nt)
+  if *primarynts = 0 then
+    every it := !I & nt := it.cat.list[it.dotpos] & member(g.nonterms, nt) do
+      insert(primarynts, nt)
+  every ntterms | tterms := []
+  every k := key(t) do
+    put(if member(first[!primarynts], k) then ntterms else tterms, k)
+  return if *primarynts > 0 then {
+    every insert(primarynts, !tterms)
+    s := " (" || truncalternates(ntterms, 5) || ")" | ""
+    "expected " || truncalternates(primarynts) || s
+  } else if *tterms > 0 then {
+    "expected " || truncalternates(tterms, 5)
+  } else {
+    "no input is legal"
+  }
+end
+<<*>>=
+procedure truncalternates(l, size)
+  /size := 3
+  l := sort(l)
+  return if *l > 0 then {
+           if *l > size then l := put(l[1:size], "...")
+           commafy(l, "or")
+         }
+end
+<<*>>=
+global srconflictcount, rrconflictcount
+global reducedsigs
+
+procedure resetconflicts()
+  srconflictcount := rrconflictcount := 0
+  reducedsigs := set()
+end
+
+procedure countconflict(sr, r, term)
+  return if sr[2] == "shift" then srconflictcount +:= 1 else rrconflictcount +:= 1
+end
+
+procedure savereduce(item)
+  return insert(\reducedsigs, image(item.cat) || item.nt)
+end
+
+procedure summarizeconflicts(outfile, g)
+  writes(outfile, 0 < srconflictcount, " shift/reduce conflicts")
+  if 0 < srconflictcount & 0 < rrconflictcount then writes(outfile, ", ")
+  writes(outfile, 0 < rrconflictcount, " reduce/reduce conflicts")
+  if 0 < srconflictcount | 0 < rrconflictcount then write(outfile)
+  n := 0; 
+  every cat := genrhs(g, lhs := key(g.nonterms)) &
+        not member(reducedsigs, image(cat) || lhs) do 
+    n +:= 1
+  write(outfile, 0 < n, " rules never reduced")
+  return
+end
 @
 \subsection{Dumping diagnostics}
 <<*>>=
-procedure lrdiag(outfile, g)
-  every i := 1 to *itemsetlist do {
-    acl := actionlists(g, itemsetlist[i])
-    every *(ac := acl[tok := key(acl)]) > 1 do
-      {<<complain about conflict on [[tok]] in [[ac]]>>}
-    write(outfile, "state ", i)
-    every write(outfile, "\t", itemimage(!itemsetlist[i]))
-    write(outfile)
-    every ac := \acl[tok := 0 ~=== key(acl) | 0] do
-      every write(outfile, "\t", (0 ~=== tok | ".")\1, "  ",
-        A := !ac & case A[2] of {
-          "shift"  : "shift " || itemsetnos[A[3]]
-          "reduce" : "reduce " || itemimage(A[3]) || " (" || A[3].uniqueid || ")"
-          "error"  : "error"
-          "accept" : "accept"
-          default  : impossible("action type ", A[2])
-        })
-    write(outfile)
-  }
+global lrdiagconflicts
+procedure loglrdiag(s, r, term)
+  /lrdiagconflicts[term] := []
+  put(lrdiagconflicts[term], [s, r])
   return
 end
-<<complain about conflict on [[tok]] in [[ac]]>>=
-l := []
-every put(l, (!ac)[2])
-write(outfile, i, ": ", commaseparate(l, "/"), " conflict on ", string(tok) | ".")
+<<*>>=
+procedure lrdiag(outfile, g)
+  local reduced
+  start_ticking(*itemsetlist, 50, "Dumping " || image(outfile)[6:-1] || "...")
+  emitff(outfile, g)
+  reduced := set()
+  every i := 1 to *itemsetlist do {
+    tick_to(i)
+    if /lrdiagconflicts | *lrdiagconflicts > 0 then lrdiagconflicts := table()
+    acl := actions(g, itemsetlist[i], loglrdiag)
+    every l := !\lrdiagconflicts[tok := key(lrdiagconflicts)] & s := l[1] & r := l[2] do 
+      {<<complain about conflict between [[s]] and [[r]] on [[tok]]>>}
+    write(outfile, "state ", i)
+    every write(outfile, "\t", itemimage(!itemsetlist[i]) | "")
+    every ac := \acl[tok := 0 ~=== key(acl) | 0] do
+      every write(outfile, "\t", (0 ~=== tok | ".")\1, "  ",
+        A := (ac | (ac ~=== !!\lrdiagconflicts[tok])) & case A[2] of {
+          "shift"  : "shift " || itemsetnos[A[3]]
+          "reduce" : {insert(reduced, image(A[3].cat) || A[3].nt)
+                      "reduce " || itemimage(A[3]) || " (" || A[3].uniqueid || ")"
+                     }
+          "error"  : "error (" || A[3] || ")"
+          "accept" : {insert(reduced, image(A[1].cat) || A[1].nt)
+                      "accept"
+                     }
+          default  : impossible("action type ", A[2])
+        })
+    write(outfile, "\t")
+    every nt := key(gt := goto[itemsetlist[i]]) & member(g.nonterms, nt) do
+      write(outfile, "\t", nt, "  goto ", itemsetnos[gt[nt]])
+    write(outfile)
+  }
+  every cat := genrhs(g, lhs := key(g.nonterms)) &
+        not member(reduced, image(cat) || lhs) do
+    write(outfile, "Never reduced: ", lhs, " : ", commaseparate(cat.list, " "))
+  write(&errout, " done")
+  return
+end
+<<complain about conflict between [[s]] and [[r]] on [[tok]]>>=
+write(outfile, i, ": ", s[2], "/", r[2], " conflict on ", string(tok) | ".")
+every write(outfile, "\t", actiondiag(g, s|r, tok))
+<<*>>=
+procedure actiondiag(g, a, tok)
+  case a[2] of {
+    "shift"  : {pt := tok;               s := "shift "  || itemsetnos[a[3]]}
+    "reduce" : {pt := a[3].cat.precterm; s := "reduce " || itemimage(a[3])}
+  }
+  return s || " (" || 
+         (if \g.prec[\pt] then g.assoc[pt] || " " || g.prec[pt] else "no precedence") ||
+         ")"
+end
 @
 \subsection{Computing lookahead sets}

@@ -1,0 +1,170 @@
+<<*>>=
+record caserec(tab, val, def)
+
+procedure newcase(val)
+  return caserec(table(), val)
+end
+
+procedure addbranch(cr, value, L[])
+  s := ""; every s ||:= string(!L)
+  if value == "default" then
+    /cr.def := s | impossible("duplicate defaults in constructed case")
+  else {
+    /cr.tab[s] := []
+    put(cr.tab[s], value)
+  }
+  return t
+end
+
+procedure casestring(cr)
+  local def
+  if /cr.def & *cr.tab = 1 then
+    return key(cr.tab)
+  else {
+    s := "case " || cr.val || " of {"
+    every p := !sort(cr.tab) do
+      s ||:= "\n  " || commaseparate(p[2], " | ") || " : " || p[1]
+    s ||:= "\n  default : " || \cr.def
+    s ||:= "\n}"
+    return s
+  }
+end
+
+procedure writecase(cr)
+  local def
+  if /cr.def & *cr.tab = 1 then
+    write(key(cr.tab))
+  else {
+    write("case ", cr.val, " of {")
+    every p := !sort(cr.tab) do
+      write(commaseparate(p[2], " | "), " : ", p[1])
+    write("  default : ", \cr.def)
+    write("}")
+  }
+end
+@
+<<*>>=  
+procedure IconLR(g)
+  static fakeline
+  initial fakeline := create(seq(1000, 1000))
+
+  reductions := set()
+  start_ticking(*itemsetlist, 50, "Action table...")
+  <<write parser>>
+  write(&errout, " done")
+  <<write definition of [[shift]]>>
+  <<write definition of [[reduce]]>>
+  write(&errout, " done")
+  if \IconReserved then {IconEmitReserved(); IconReserved := &null}
+  return
+end
+@
+<<write parser>>=
+iwrite(0, "procedure P_", g.start, "(states, values)")
+iwrite(2, "/states := [1]; /values := []")
+statecase := newcase("states[1]")
+every i := 1 to *itemsetlist do {
+  tick_to(i)
+  tokencase := newcase("token")
+  every tok := 0 ~=== key(ac := actions(g, itemsetlist[i])) do {
+    addbranch(tokencase, g.terms[tok], IconAction(ac[tok], reductions))
+  }
+  if member(ac, 0) then 
+    addbranch(tokencase, "default", IconAction(ac[0], reductions))
+  addbranch(statecase, i, casestring(tokencase))
+}
+iwrites(2, "repeat ")
+writecase(statecase)
+iwrite(0, "end")
+@
+<<*>>=
+procedure IconAction(A, reductions)
+  return case A[2] of {
+    "shift"  : concat("shift(states, values, ", itemsetnos[A[3]], ")")
+    "reduce" : { insert(reductions, A[3].uniqueid)
+                 concat("reduce(states, values, ", A[3].uniqueid, ") # ",
+                        itemimage(A[3]))
+               }
+    "error"  : { msg := A[3] || " in parser state "
+                 "error(" || image(msg) || ", states[1])"
+               }
+    "accept" : "return values[2] # values[1] is EOF!"
+    default  : impossible("action type ", A[2])
+  }
+end
+@
+<<*>>=
+procedure concat(L[])
+  s := ""
+  every x := !L do s ||:= (string|image)(x)
+  return s
+end
+@
+<<write definition of [[reduce]]>>=
+write("global iidebug\n")
+write("procedure reduce(states, values, itemno)")
+write("  rdebug(\\iidebug, states[1], values[1], itemno)")
+itemnocase := newcase("itemno")
+sr := sort(reductions)
+start_ticking(sr[-1], 50, "Goto table...")
+every it := itemtab[i := !sr] do {
+  tick_to(i)
+  if not it.dotpos = *it.cat.list + 1 then impossible("bad reduction")
+  L := [itemnocase, i, "{"]
+  case *it.cat.list of {
+    0 : &null
+    1 : put(L, "ii1 := pop(values) ; pop(states)\n")
+    default : 
+      every put(L, concat("ii", i := *it.cat.list to 1 by -1, 
+                          " := pop(values) ; pop(states)\n"))
+  }
+  if \it.cat.semantics then
+    every put(L, "push(values, {\n" |
+                 "#line " || adjustline(\it.cat.position) || "\n" |
+                 !it.cat.semantics || "\n" | 
+                 "#line " || (\it.cat.position, @fakeline) || " \"generated-code\"\n" |
+                 "} | &null)\n")
+  else 
+    put(L, "push(values, &null)\n")
+  if *statecase.tab > 1 then 
+    addbranch(statecase, "default", 
+              "stop(\"impossible state \", states[1], \"in reduce\")")
+  statecase := newcase("states[1]")
+  every t := itemsetnos[\goto[s := key(goto)][it.nt]] do
+    addbranch(statecase, itemsetnos[s], t)
+  every put(L, "push(states, " | casestring(statecase) | ")\n")
+  put(L, "}")
+  addbranch ! L
+}
+addbranch(itemnocase, "default", "stop(\"impossible reduction \", itemno)")
+writecase(itemnocase)
+write("end")
+<<write [[rdebug]]>>
+@
+<<write definition of [[shift]]>>=
+  every write(
+"" |
+"link ebnflex" |
+"" |
+"procedure shift(states, values, stateno)" |
+"  write(\\iidebug, states[1], \": shifted \", token, \" [\", tval, \"]\")" |
+"  push(values, tval)" | 
+"  push(states, stateno)" |
+"  lex()" |
+"  return" |
+"end")
+<<write [[rdebug]]>>=
+every write(
+"procedure rdebug(outfile, state, value, itemno)" |
+"  static tab" |
+"  initial {" |
+"    tab := table()")
+every it := itemtab[i := !sort(reductions)] do
+  write("    tab[", i, "] := ", image(it.nt || " -> " || 
+                                      commaseparate(it.cat.list, " ") || 
+                                      " (" || i || ")"))
+every write(
+"  }" |
+"  return write(outfile, state, \": reduced \", \\tab[itemno] | itemno || \"???\", \" [\", image(value), \"]\")" |
+"end" |
+"")

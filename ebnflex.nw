@@ -33,21 +33,39 @@ global EOF
 [[lex]] sets the new [[token]] and [[tval]], returning [[token]].
 <<*>>=
 procedure lex(newfile)
-  static toks, infile
+  static toks,  infile
+  local eol
   initial {EOF    := " end of file "; /lineno := 0; toks := [];
            infile := &input; filename := "standard input"}
   filename := image(infile := \newfile)[6:-1]
-  while *toks = 0 & thisline := read(infile) do {
-    every put(toks, tokens(thisline)) do 
-      every put(toks, tval | thispos)
-    lineno +:= 1
+  if \newfile then lineno := 0
+  if *toks = 1 & token := scantokens(pop(toks)) then
+    return token
+  else if *toks = 2 & (pop(toks) ? { 
+      tab(thispos := pop(toks))
+      if token := scantokens() then {
+        every push(toks, if pos(0) then 1 else &pos | &subject)
+        return token
+      } 
+    }) then &null
+  else {
+    while thisline := read(infile) do {
+      lineno +:= 1
+      thispos := 1
+      thisline ?    
+        if (="#line ", lineno := integer(tab(many(&digits)))-1, 
+            =" \"", filename := tab(upto('"')), ="\"", pos(0)) |
+           (="<* LINE ", lineno := integer(tab(many(&digits)))-1, 
+            =" \"", filename := tab(upto('"')), ="\" *>", pos(0)) then { }
+        else {
+          if token := scantokens() then {
+            every push(toks, if pos(0) then 1 else &pos | &subject)
+            return token
+          }
+        }
+    }
   }
-  return if *toks > 0 then {every token | tval | thispos := get(toks); token}
-         else {thisline := "<end of file>"; thispos := 1; token := tval := EOF}
-end
-
-procedure tokens(line)
-  line ? suspend scantokens()
+  return token := tval := EOF
 end
 @
 Many programs will use one of these two procedures much of the time.
@@ -71,8 +89,32 @@ procedure lexwhere(outfile)
   return
 end
 
-procedure error(L[])
+procedure erroratfl(file, line, L[])
   write ! ([&errout, image(filename), ", line ", lineno, ": "] ||| L)
-  lexwhere()
-  stop("token = ", token, " [", image(tval), "]")
+  stop()
 end
+
+procedure errorat(loc, L[])
+  write ! ([&errout, loc, ": "] ||| L)
+  stop()
+end
+
+procedure error(L[])
+  <<write error output with position>>
+  stop()
+end
+
+procedure warning(L[])
+  write ! ([&errout, image(filename), ", line ", lineno, ": Warning -- "] ||| L)
+end
+
+procedure impossible(L[])
+  push(L, "This can't happen: ")
+  <<write error output with position>>
+  write(&errout, "\n")
+  &null[0]
+end
+<<write error output with position>>=
+write ! ([&errout, image(filename), ", line ", lineno, ": "] ||| L)
+lexwhere()
+write(&errout, "token = ", token, " [", image(tval), "]")

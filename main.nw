@@ -2,18 +2,22 @@
 link openfile
 
 procedure main(args)
+  opts := []
   emitter := Icon
   while case args[1] of {
+    "-d"       : put(opts, args[1])
     "-flatten" : flatten := args[1]
-    "-lalr"    : dolalr := args[1]
+    "-slr"     : dolr := slr1
     "-lr1"     : lr1 := args[1]
     "-parser"  : doparser  := args[1]
     "-grammar" : dogrammar := args[1]
+    "-prec"    : showprec := args[1]
     "-icn" : emitter := Icon
     "-c"   : emitter := C
+    "-yacc" : yacc := args[1]
     default : if args[1][1] == "-" then stop("Unrecognized argument ", args[1])
   } do get(args)
-  if /doparser & /dogrammar & /dolalr then doparser := 1
+  if /showprec & /doparser & /dogrammar & /dolr then doparser := 1
   case *args of {
     0       : g := readgrammar(&input)
     1       : g := readgrammar(open(filename := args[1])) | 
@@ -23,17 +27,19 @@ procedure main(args)
   emitter("stringdef")(g)
   if \flatten then
     flattengrammar(g)
-  if \lr1 | \dolalr then
+  if \lr1 | \dolr then
     lrxform(g)
-  writegrammar(\dogrammar & &output, g)
+  writegrammar(\dogrammar & &output, g, yacc)
   if \doparser then {
     emitter("infersemantics")(g)
-    ll1(g, args, emitter("emit"))
+    ll1(g, opts ||| args, emitter("emit"))
   }
-  if \dolalr then {
+  if \dolr then {
     emitter("infersemantics")(g)
-    lalr1(g, args, emitter("lalr"))
+    dolr(g, opts ||| args, emitter("lr"))
   }
+  if \showprec then
+    emitter("precedence")(g)
 end
 
 procedure usage()
@@ -44,6 +50,7 @@ procedure usage()
 "-lr1      remove EBNF constructs & make LR(1) grammar" |
 "-parser   spit an LL(1) recursive descent parser on stdout (default)" |
 "-grammar  rewrite the grammar on stdout (after flattening or yaccifying" |
+"-yacc     if emitting grammar, put it in yacc form" |
 "-icn      emit Icon (the default)" |
 "-c        emit a C parser" |
 "" |
@@ -56,8 +63,4 @@ procedure usage()
 "    -flatten -parser"
 )
   stop()
-end
-
-procedure impossible(L[])
-  error ! push(L, "This can't happen --- ")
 end

@@ -13,3 +13,4 @@ writes(&errout, "Undeclared symbols:")
 every writes(&errout, " ", !(g.leaves -- defined))
 write(&errout)
 stop()
+@

@@ -1,5 +1,17 @@
 <<*>>=
-procedure writegrammar(outfile, g)
+global pixsemantics
+
+procedure writegrammar(outfile, g, yacc)
+  ps := pixsemantics
+  write(outfile, "%start ", g.start)
+  if \yacc then { yacctx(g) ; pixsemantics := set(["{"]) }
+  if /yacc then
+    every t := key(g.terms) do
+      write(outfile, "%term ", t, " " || (t ~== g.terms[t]) | "")
+  else
+    every write(outfile, "%token ", (!sort(g.terms, 2))[2])
+  <<write out precedence info from [[g]]>>
+  write(outfile, "%%")
   every writes(outfile, lhs := !g.ntlist, " : ") do
     case type(rhs := g.nonterms[lhs]) of {
       "Opt" | "Clo" | "Cat" | "string" : 
@@ -8,9 +20,25 @@ procedure writegrammar(outfile, g)
                 write(outfile, s[2:0], ";") }
       default : error("impossible node type")
     }
+  pixsemantics := ps
   return g
 end
-
+<<write out precedence info from [[g]]>>=
+maxprec := 0
+every maxprec <:= !g.prec
+l := []
+every i := 1 to maxprec do put(l, [])
+al := list(maxprec)
+every k := key(g.prec) do {
+  put(l[g.prec[k]], k)
+  al[g.prec[k]] := g.assoc[k]
+}
+every i := 1 to maxprec do {
+  writes(outfile, "%", al[i])
+  every writes(outfile, " ", g.terms[!l[i]])
+  write(outfile)
+}
+<<*>>=
 procedure nodepix(g, node, separator)
   return case type(node) of {
     "Opt" : "[" || nodepix(g, node.node) || "]"
@@ -18,10 +46,11 @@ procedure nodepix(g, node, separator)
     "Cat" : {
        s := ""
        every s ||:= nodepix(g, !node.list, node) || " "
-       if \node.semantics then
+       <<add precedence from [[node]] to [[s]] if needed>>
+       if \node.semantics & /pixsemantics then # frightful cheat
          s || "/* " || commaseparate(node.semantics, "\n") || " */"
        else 
-         s[1:-1]
+         s[1:-1] | ""
      }
     "Alt" : {
        s := ""
@@ -34,4 +63,24 @@ procedure nodepix(g, node, separator)
     default  : error("impossible node type")
   }
 end
+@
+<<add precedence from [[node]] to [[s]] if needed>>=
+if not (if member(g.terms, lp := node.list[*node.list to 1 by -1]) then
+          lp == \node.precterm) then
+  s ||:= "%prec " || g.terms[\node.precterm] || " "
+<<*>>=
+procedure yacctx(g)
+  static quote, n
+  initial {quote := "\""; n := create("XXX" || seq())}
+  every k := key(g.terms) do
+    if g.terms[k][1] == g.terms[k][-1] == quote then 
+      if *g.terms[k] = 3 then g.terms[k][1] := g.terms[k][-1] := "'"
+      else g.terms[k] := 
+        (g.terms[k] ? {
+          move(1)
+          map(tab(many(&letters)), &lcase, &ucase) | @n
+        })
+  return g
+end
 
+          

@@ -5,7 +5,8 @@ procedure Icon(what)
     "emit"           : IconEmitnt
     "stringdef"      : IconStringdef
     "infersemantics" : IconSemantics
-    "lalr"           : IconLalr
+    "precedence"     : IconPrec
+    "lr"             : IconLR
     default : error("Icon doesn't support ", what)
   }
 end
@@ -70,9 +71,9 @@ procedure IconEmitnode(g, node, indent, assignment)
         iwrite(initindent, "{")
         every IconEmitnode(g, node.list[i := 1 to *node.list], indent + ITAB,
                            "ii" || i || " := ")
-#        write("#line ", \node.position)   # doesn't work! (wrong line reported)
+        write("#line ", adjustline(\node.position))
         every iwrite(indent, !\node.semantics)
-#        write("#line ", \node.position & @fakeline, image("generated code"))
+        write("#line ", \node.position & @fakeline, image("generated code"))
         iwrite(indent, "}")
         }
     "Opt" | "Clo" : {
@@ -161,7 +162,7 @@ procedure Idosem(g, node)
     "Alt" : every Idosem(g, !node.list)
     "Cat" : {
        every Idosem(g, !node.list)
-       /node.semantics :=
+       /node.semantics := 
          [case *node.list of {
             0 : "&null"
             1 : "ii1"
@@ -181,5 +182,22 @@ procedure Idosem(g, node)
        }
     "string" : &fail
     default  : error("impossible node type")
+  }
+end
+@
+<<*>>=
+procedure IconPrec(g)
+  l := 
+  every p := !sort(g.prec, 2) & term := p[1] do
+    write("  prec[", term, "] := ", p[2], 
+          ";  assoc[", term, "] := ", image(g.assoc[p[1]]))
+  return
+end
+<<*>>=
+procedure adjustline(s)
+  local i
+  s ? {
+    i := tab(many(&digits)) - 1 | ""
+    return i || tab(0)
   }
 end

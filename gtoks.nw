@@ -1,6 +1,6 @@
 <<*>>=
 global SEMANTICS, IDENT, STARTSEM, ENDSEM
-procedure scantokens()
+procedure scantokens(eol)
   static alphanum, semantics, semmatch
   initial { 
     alphanum := &letters ++ &digits ++ '_'
@@ -12,37 +12,35 @@ procedure scantokens()
     semmatch["/."] := "./"
     semmatch["/*"] := "*/"
   }
-  repeat {
-    if /semantics then {
-      tab(many(' \t'))
-      if ="#" | pos(0) then {
-        fail
-      } else if any(&letters) & tval := tab(many(alphanum)) then {
-        token := IDENT
-      } else if semantics := tval := =key(semmatch) then {
-        token := STARTSEM
-      } else if token := =("'"|"\"") then {
-        tval := tab(upto(token)) | error("unclosed ", token)
-        move(1)
-      } else if pos(1) & tval := ="%%" & pos(0) then {
-        token := "%%"
-      } else {
-        token := tval := move(1)
-      }
-      thispos := &pos
-      suspend token
-    } else {
-      if tval := tab(find(semmatch[semantics])) then {
-        suspend token := SEMANTICS
-        tval := =semmatch[semantics] | stop("impossible")
-        suspend token := ENDSEM
-        semantics := &null
-      } else if pos(0) then {
-        fail
-      } else {
+  if \eol then fail
+  if /semantics then {
+    tab(many(' \t'))
+    thispos := &pos
+    if ="#" | pos(0) then {
+      fail
+    } else if any(&letters) & tval := tab(many(alphanum)) then {
+      token := IDENT
+    } else if semantics := tval := =key(semmatch) then {
+      token := STARTSEM
+    } else if token := =("'"|"\"") then {
+      if not (tval := tab(upto(token))) then {
         tval := tab(0)
-        suspend token := SEMANTICS
+        error("unclosed ", token)
       }
+      move(1)
+    } else if pos(1) & tval := ="%%" & pos(0) then {
+      token := "%%"
+    } else {
+      token := tval := move(1)
+    }
+    return token
+  } else {
+     if tval := =semmatch[semantics] then {
+       semantics := &null
+       return token := ENDSEM
+    } else {
+       tval := tab(find(semmatch[semantics]) | 0)
+       return token := SEMANTICS
     }
   }
 end

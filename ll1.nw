@@ -1,10 +1,10 @@
 \section{Generating an LL(1) parser}
 <<*>>=
-global epsilon, epsilonset, endmarker, debugging, emitnt, reservedfile
+global epsilon, epsilonset, endmarker, debugging, emitnt
 
 procedure ll1(g, argv, emit)
   epsilon     := " %Epsilon% "
-  endmarker   := " %End% "
+  endmarker   := "end of file"
   epsilonset  := set([epsilon])
   ntlist      := g.ntlist		# nonterms in order of appearance
   while case argv[1] of {
@@ -20,7 +20,7 @@ procedure ll1(g, argv, emit)
       g.nonterms[lhs] := Alternate(g.nonterms[lhs], Alt([]))
   compute_first(g)
   compute_follow(g)
-  if \debugging then { emitff(g); emitpredict(g) }
+  if \debugging then { emitff(&errout, g); emitpredict(g) }
   showconflicts(g)
   every write(!g.preamble)
   emitcode(g, ntlist, emit)
@@ -123,9 +123,10 @@ procedure follow_tree(g, node, new)
           follow_tree(g, node.list[i], first_list(node.list[i+1:0], follow[node]))
         follow_tree(g, node.list[*node.list], new)
       }
-      "Alt"         : every follow_tree(g, !node.list, new)
-      "Clo" | "Opt" : follow_tree(g, node.node, new)
-      default       : error("unknown node type")
+      "Alt"   : every follow_tree(g, !node.list, new)
+      "Opt"   : follow_tree(g, node.node, new)
+      "Clo"   : follow_tree(g, node.node, new ++ first[node.node])
+      default : error("unknown node type")
     }
   return
 end
@@ -164,14 +165,14 @@ procedure showpredict(lhs, node)
   write(&errout)
 end
 <<*>>=
-procedure emitff(g)
+procedure emitff(outfile, g)
   every l := (!sort(g.nonterms))[1] do {
-    write(&errout, l)
-    write(&errout, "\tFIRST")
-    every write(&errout, "\t\t", !sort(first[l]))
-    write(&errout, "\tFOLLOW")
-    every write(&errout, "\t\t", !sort(follow[l]))
-    write(&errout)
+    write(outfile, l)
+    write(outfile, "\tFIRST")
+    every write(outfile, "\t\t", !sort(first[l]))
+    write(outfile, "\tFOLLOW")
+    every write(outfile, "\t\t", !sort(follow[l]))
+    write(outfile)
   }
 end
 <<*>>=

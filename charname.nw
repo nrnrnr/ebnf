@@ -11,6 +11,7 @@ procedure charname(s)
     nametab[">="] := "GE"
     nametab["=>"] := "DARROW"
     nametab["->"] := "ARROW"
+    nametab[":>"] := "BEAK"
     nametab[""] := "EMPTY"
     every c := !(&letters ++ &digits ++ '_') do nametab[c] := c
   }

@@ -6,3 +6,6 @@
 *.u1
 *.u2
 /ebnf
+/junk
+i.output
+ii.tab.sml

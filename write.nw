@@ -80,11 +80,29 @@ procedure showsemantics(g, node, left, right)
     default : impossible("type of semantics")
   }
 end
+@ 
+I no longer remember what's going on here --- I'm just trying to get
+the grammar generator from the New Jersey Machine-Code Toolkit to work.
+Note that the node is always a [[Cat]] node.
 <<*>>=
 record allargs(ident)
 
 procedure showyaccsem(g, node)
-  return case type(s := node.semantics) of {
+  s := node.semantics
+  return case type(s) of {
+    "list" : "{ " || commaseparate(s, "\n") || " }"
+    "null" :  "{ $0 = $" || copy_number(g, node) || "; }"
+    "string"  : "{ $0 = " || s || "(" || arg_list("$", arg_numbers(g, node)) || "); }"
+    "allargs" : "{ $0 = " || s.ident || "(" || 
+                   arg_list("$", {l := []; every put(l, 1 to *node.list); l}) || "); }"
+    default : impossible("type of semantics")
+  }
+end
+<<*>>=
+procedure oldshowyaccsem(g, node)
+  s := node.semantics
+#  while type(s) == "list" & *s = 1 do s := s[1]
+  return case type(s) of {
     "list" : fail
     "null" :  "{ $0 = $" || copy_number(g, node) || "; }"
     "string"  : "{ $0 = " || s || "(" || arg_list("$", arg_numbers(g, node)) || "); }"
@@ -137,7 +155,9 @@ procedure yacctx(g)
       else g.terms[k] := 
         (g.terms[k] ? {
           move(1)
-          map(tab(many(&letters)), &lcase, &ucase) | charname(tab(-1)) | @n
+          token_prefix || map(tab(many(&letters)), &lcase, &ucase) | 
+          token_prefix || charname(tab(-1)) | 
+          @n
         })
   return g
 end
@@ -154,8 +174,19 @@ end
 procedure mltokname(s)
   static n
   initial n := create("XXX" || seq())
-  return "R'" || 
-     (s ? (map(tab(many(&letters)), &lcase, &ucase) | charname(tab(0)) | @n))
+  return "R" || (s ? tick_fragments())
+end
+
+procedure tick_fragments()
+  static nonletters
+  initial nonletters := ~ &letters
+  if pos(0) then
+    return ""
+  else
+    return "'" || ( map(tab(many(&letters)), &lcase, &ucase) |
+                    charname(tab(many(nonletters))) |
+                    stop("mltokname epic fail") 
+                  ) || tick_fragments() 
 end
 @ 
 Only called for cat nodes

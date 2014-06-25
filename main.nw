@@ -1,7 +1,9 @@
 <<*>>=
 link openfile
+global die_on_conflicts, token_prefix
 
 procedure main(args)
+  token_prefix := ""
   opts := []
   emitter := Icon
   while case args[1] of {
@@ -12,15 +14,19 @@ procedure main(args)
     "-lr1"     : lr1 := args[1]
     "-parser"  : doparser  := args[1]
     "-grammar" : dogrammar := args[1]
+    "-tex" : dotex := args[1]
     "-infer"   : doinfer := args[1]
     "-prec"    : showprec := args[1]
     "-infer"   : infer := args[1]
     "-icn" : emitter := Icon
     "-c"   : emitter := C
     "-ml"  : emitter := ML
-    "-start" : {get(args); substart := args[1]}
+    "-tabfilename" : (get(args), iitabfilename := args[1])
+    "-start" : (get(args), substart := args[1])
     "-yacc" : yacc := args[1]
     "-mlyacc" : yacc := args[1]
+    "-token-prefix" : (get(args), token_prefix := args[1])
+    "-picky"  : die_on_conflicts := args[1]
     default : if args[1][1] == "-" then usage()
   } do get(args)
   if /showprec & /doparser & /dogrammar & /dolr then doparser := 1
@@ -38,7 +44,8 @@ procedure main(args)
     emitter("infersemantics")(g)
   if \lr1 | \dolr then
     lrxform(g, emitter)
-  writegrammar(\dogrammar & &output, g, yacc, emitter)
+  writegrammar(\dogrammar & /dotex & &output, g, yacc, emitter)
+  writetex    (\dogrammar & \dotex & &output, g, yacc, emitter)
   if \doparser then
     ll1(g, opts ||| args, emitter)
   if \dolr then
@@ -50,18 +57,22 @@ end
 procedure usage()
   every write("Usage: ebnf [options] [grammarfile]" |
 "Options:" | 
-"-d	   write debugging info on standard error" |
-"-flatten  flatten grammar -- needed if LL(1) uses semantic actions" |
-"-slr      emit SLR(1) parser (Icon only)" |
-"-lr1      remove EBNF constructs & make LR(1) grammar" |
-"-parser   spit an LL(1) recursive descent parser on stdout (default)" |
-"-grammar  rewrite the grammar on stdout (after flattening or yaccifying" |
-"-infer    infer semantics for a rewritten grammar" |
-"-yacc     if emitting grammar, put it in yacc form" |
-"-mlyacc   if emitting grammar, put it in mlyacc form" |
-"-icn      emit Icon (the default)" |
-"-c        emit a C parser" |
-"-ml       emit an ML parser" |
+"-d	       write debugging info on standard error" |
+"-flatten      flatten grammar -- needed if LL(1) uses semantic actions" |
+"-slr          emit SLR(1) parser (Icon only)" |
+"-lr1          remove EBNF constructs & make LR(1) grammar" |
+"-parser       spit an LL(1) recursive descent parser on stdout (default)" |
+"-grammar      rewrite the grammar on stdout (after flattening or yaccifying" |
+"-infer        infer semantics for a rewritten grammar" |
+"-yacc         if emitting grammar, put it in yacc form" |
+"-mlyacc       if emitting grammar, put it in mlyacc form" |
+"-tex          if emitting grammar, put it in LaTeX form" |
+"-token-prefix prefix before token names for -yacc" |
+"-icn          emit Icon (the default)" |
+"-c            emit a C parser" |
+"-ml           emit an ML parser" |
+"-tabfilename filename    which file to write token table to" |
+"-picky        error exit if there are parsing conflicts" |
 "" |
 "Useful combinations:" |
 "  New grammars w/o extended BNF:" |

@@ -201,7 +201,10 @@ procedure showconflicts(g)
   every nt := !sort(g.nonterms) do
     count +:= conflicts(nt[2], nt[1])
   if count > 0 then 
-    write(&errout, count, " conflicts.")
+    if \die_on_conflicts then
+      error(count, " conflicts.")
+    else
+      write(&errout, count, " conflicts.")
   else if \debugging then
     write(&errout, "Grammar is OK")
 end
@@ -219,8 +222,12 @@ procedure conflicts(node, lhs)
       every n +:= conflicts(!node.list, lhs)
     }
     "Opt" | "Clo" : {
-      if *(predict(node.node, node) ** follow[node]) > 0 & n +:= 1 then
+      if *(ambiguous := predict(node.node, node) ** follow[node]) > 0 & n +:= 1 then {
         write(&errout, lhs, ": can't decide whether to take ", nodeimage(node))
+        writes(&errout, "  on seeing tokens:")       
+        every writes(&errout, " ", !ambiguous)
+        write(&errout)
+      }
       n +:= conflicts(node.node, lhs)
     }
     "Cat"    : every n +:= conflicts(!node.list, lhs)

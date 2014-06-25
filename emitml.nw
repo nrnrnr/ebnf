@@ -442,6 +442,17 @@ end
 procedure ml_token_pat(g, t)
   return if /g.termtypes[t] then g.terms[t] else "(" || g.terms[t] || " _)"
 end
+@ 
+<<*>>=
+procedure mixcaps_to_allcaps(s)
+  s ? {
+    tab(many(' \t'))
+    t := map(move(1), &lcase, &ucase) | ""
+    while t ||:= map(tab(upto(&ucase)), &lcase, &ucase) || "_" do
+      t ||:= move(1)
+    return t || map(tab(0), &lcase, &ucase)
+  }
+end
 <<mlfuns.t>>=
 (* set functions *)
 type 'a set = 'a list

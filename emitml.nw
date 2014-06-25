@@ -24,81 +24,148 @@ procedure MLResynch(pos)
 end
 <<*>>=
 procedure MLEmitPreamble(g)
-  local parser
-  parser := (\g.attributes["parser"])[1] | "Parser"
+  local do_rgn, token
+  do_rgn := g.attributes["region"]
+  token := ((\g.attributes["token"])[1] | "Token")
   <<emit [[ii.tab.sml]] file>>
-every write(
-"structure " || parser || " = struct" |
-"  datatype 'a stream = STREAM of unit -> 'a * 'a stream" |
-"  fun invoke (STREAM lex) = lex()" |
-"  " |
-"  type token = Token.token" |
-"  " |
-"  exception SyntaxError of {parsing:string, msg:string list, found:token}" |
-"  exception Expected of {expected:string, found:token, parsing:string option} " |
-"	   (* token expected, nonterminal being parsed *)" |
-"  ")
-every write(
-"local" |
-"  open Token" |
-"  " |
-"  exception TokenMismatch of string" |
-"  fun expect (f, token, lex, nt) =" |
-"    (f token, invoke lex) handle TokenMismatch t => " |
-"         raise Expected {expected=t, found=token, parsing=nt}" |
-"  " |
-"  fun synerror (t, nt, s) = raise SyntaxError {parsing=nt, found=t, msg=s}" |
-"  " |
-"  " |
-"  (* closure and optional for parsing *)" |
-"  fun closure((token, lex), predicate, parse) =" |
-"    let fun cl(token, lex, l) =" |
-"	   if predicate token then" |
-"	     let val (x, (token, lex)) = parse(token, lex)" |
-"	     in  cl(token, lex, x::l)" |
-"	     end" |
-"	   else" |
-"	     (rev l, (token, lex))" |
-"    in  cl(token, lex, [])" |
-"    end" |
-"  " |
-"  fun optional((token, lex), predicate, parse) = " |
-"     if predicate token then " |
-"	let val (x, (token, lex)) = parse(token, lex)" |
-"	in  (SOME x, (token, lex))" |
-"	end" |
-"     else " |
-"	(NONE, (token, lex))" |
-"  " |
-"  fun make_parser (f, unEOF) stream =" |
-"    let val (result, (token, lex)) = f (invoke stream)" |
-"    in  (unEOF token; result) handle TokenMismatch _ => " |
-"          raise Expected {expected=\"end of file\", found=token, parsing=NONE} " |
-"    end" |
-"  " |
-"")
+  emit_templates(
+     <<template list>>,
+     "parser",    ((\g.attributes["parser"])[1] | "Parser"), 
+     "Token",     token,
+     "lexresult", if /do_rgn then "'a" else "'a * (int*int)",
+     "tokenlex",  if /do_rgn then "token, lex" else "token, trgn, lex",
+     <<template pairs>>)
   default_emit_preamble(g, ML)
   write()
   <<emit ``untoken'' functions>>
   return
 end
+<<template list>>=                      
+[
+"structure %parser = struct",
+"  datatype 'a stream = STREAM of unit -> %lexresult * 'a stream",
+"  fun invoke (STREAM lex) = lex()",
+"  ",
+"  type token = %Token.token",
+"  ",
+"  exception SyntaxError of {parsing:string, msg:string list, found:token%{region:region}}",
+"  exception Expected of {expected:string, found:token, parsing:string option} ",
+"	   (* token expected, nonterminal being parsed *)",
+"  ",
+if \g.attributes["arg-pat"] then {
+  s := "fun makeParser (" 
+  every s ||:= !g.attributes["arg-pat"] || " "
+  s ||:= ") = let"
+} else
+  "local",
+<<closing of parser>>=
+write("in")
+if /g.attributes["arg-pat"] then 
+  writes("  val parser =")
+write("  make_parser(P_", g.start, ", unEOF)")
+write("end (*local*)")
+@ 
+<<template list>>=
+"  open %Token",
+"  ",
+if /do_rgn then &null 
+else [
+  "  val nullRegion = (0, 0)",
+  "  fun span ((0,0), r) = r",
+  "    | span (r, (0,0)) = r", 
+  "    | span ((l1, h1), (l2, h2)) = if l1 < h2 then (l1, h2) else (l2, h1)",
+  "  fun startRegion (first, last) = (first, first)",
+  ""],
+"  exception TokenMismatch of string",
+"  fun expect (f, %tokenlex, nt) =",
+"    (f token%trgn, invoke lex) handle TokenMismatch t => ",
+"         raise Expected {expected=t, found=token, parsing=nt}",
+"  ",
+"  fun synerror (t%trgn, nt, s) = raise SyntaxError {parsing=nt, found=t, msg=s%{region=trgn}}",
+"  ",
+"  ",
+"  (* closure and optional for parsing *)",
+"  fun closure((%tokenlex), predicate, parse) =",
+"    let fun cl(%tokenlex, l%{rgn'}) =",
+"	   if predicate token then",
+"	     let val (x%rgn, (%tokenlex)) = parse(%tokenlex)",
+"	     in  cl(%tokenlex, x::l%{region_span})",
+"	     end",
+"	   else",
+"	     (rev l%{rgn'}, (%tokenlex))",
+"    in  cl(%tokenlex, []%yyrgn)",
+"    end",
+<<template pairs>>=
+"rgn",           if /do_rgn then "" else ", rgn",
+"rgn'",          if /do_rgn then "" else ", rgn'",
+"trgn",          if /do_rgn then "" else ", trgn",
+"region=trgn", 	 if /do_rgn then "" else ", region=trgn",
+"region:region", if /do_rgn then "" else ", region:int*int",
+"region_span", 	 if /do_rgn then "" else ", span(rgn, rgn')",
+"nullRegion",    if /do_rgn then "" else ", nullRegion",
+"yyrgn",       	 if /do_rgn then "" else ", startRegion trgn",
+<<template list>>=
+"  ",
+"  fun optional((%tokenlex), predicate, parse) = ",
+"     if predicate token then ",
+"	let val (x%rgn, (%tokenlex)) = parse(%tokenlex)",
+"	in  (SOME x%rgn, (%tokenlex))",
+"	end",
+"     else ",
+"	(NONE%yyrgn, (%tokenlex))",
+# N.B. we really should do better here --- instead of null region, 
+# we could use the empty region immediately preceding the non-satisfying token.
+"  ",
+"  fun make_parser (f, unEOF) stream =",
+"    let val (result%rgn, (%tokenlex)) = f (invoke stream)",
+"    in  (unEOF token; result) handle TokenMismatch _ => ",
+"          raise Expected {expected=\"end of file\", found=token, parsing=NONE} ",
+"    end",
+"  ",
+""]
+@ 
+<<*>>=
+procedure emit_templates(templates, pairs[])
+  t := table()
+  while k := get(pairs) do t[k] := get(pairs)
+##  write(&errout, "Templates: ")
+##  every k := key(t) do write(&errout, "  ", k, " --> ", t[k])
+  return emit_templates_tab(templates, t)
+end
 
+procedure emit_templates_tab(templates, t)
+  every s := !templates do 
+    case type(s) of {
+      "&null" : &null
+      "string" : 
+	 s ? {
+           while writes(tab(upto('%'))) do {
+             ="%"
+             if ="%" then 
+               writes("%")
+             else if (="{", k := tab(upto('}')), ="}") | (k :=tab(many(&letters))) then
+               writes(t[k] | stop(k, " unbound in template"))
+             else 
+               stop("Ill-formed % construct in template: (",
+                    image(move(3) || "..." | tab(0)), ")")
+           }
+           write(tab(0))
+         }
+      "list" : emit_templates_tab(s, t)
+    }
+  return
+end
+@ 
+<<*>>=
 procedure MLEmitPostamble(g)
   default_emit_postamble(g, ML)
-  write("in")
-  if \g.attributes["arg-pat"] then {
-    writes("  fun mk_parser (")
-    every write(!g.attributes["arg-pat"])
-    write(") =")
-  } else
-    write("  val parser =")
-  write("  make_parser(P_", g.start, ", unEOF)")
-  write("end (*local*)")
+  <<closing of parser>>
   write("end (* Parser *)")
   return
 end
 <<*>>=
-global ITAB, thisnt
+global ITAB, thisnt, track_regions, tokenlex
+global iitabfilename
 procedure MLEmitnt(g, nt)
   local outfile
   static fun
@@ -106,21 +173,24 @@ procedure MLEmitnt(g, nt)
     ITAB := 4
     fun := "fun"
   }
-  write(fun, " P_", thisnt := nt, "(token, lex) =")
+  track_regions := g.attributes["region"]
+  tokenlex := if /track_regions then "token, lex" else "token, trgn, lex"
+  write(fun, " P_", thisnt := nt, "(", tokenlex, ") =")
   fun := "and"
   write(if type(g.nonterms[nt]) ~== "Alt" then 
               " # " || prodimage(nt[1], g.nonterms[nt]) else "")
   MLEmitnode(g, nt, g.nonterms[nt], ITAB)
 end
 <<emit [[ii.tab.sml]] file>>=
-outfile := open("ii.tab.sml", "w") | stop("can't open ii.tab.sml")
-write(outfile, "signature TOKEN = sig")
+outfile := open(\iitabfilename | "ii.tab.sml", "w") |
+           stop("can't open " ||  (\iitabfilename | "ii.tab.sml"))
+write(outfile, "signature ", mixcaps_to_allcaps(token), " = sig")
 emit_ml_token_datatype(outfile, g)
 write(outfile, "val reserved   : string -> token option")
 write(outfile, "val unReserved : token  -> string option")
 write(outfile, "end")
 
-write(outfile, "structure Token : TOKEN = struct")
+write(outfile, "structure ", token, " : ", mixcaps_to_allcaps(token), " = struct")
 emit_ml_tokendef(outfile, g)
 emit_ml_reserved(outfile, g)
 write(outfile, "end")

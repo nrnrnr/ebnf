@@ -1,0 +1,14 @@
+SOURCE=`echo *[!t].nw`
+ICONC=iconc
+
+ebnf.icn:	$SOURCE
+	notangle -L'#line %-1L "%F"%N' $prereq | ilump > $target
+
+ebnf: ebnf.icn
+	$ICONC -o $target $prereq
+
+$BIN/ebnf: ebnf.icn
+	$ICONC -o $target $prereq
+
+clean:V:
+	rm -f *~ *.icn y.tab.[ch] y.output

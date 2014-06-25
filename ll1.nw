@@ -1,3 +1,5 @@
+% -*- mode: Noweb; noweb-code-mode: icon-mode -*-
+
 \section{Generating an LL(1) parser}
 <<*>>=
 global epsilon, epsilonset, endmarker, debugging, emitnt

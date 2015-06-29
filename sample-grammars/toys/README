@@ -1,0 +1,3 @@
+The .g files are source code.
+Not sure what the .y files are---probably
+the results of calling enbf -grammar -yacc.

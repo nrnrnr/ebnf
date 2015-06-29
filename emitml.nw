@@ -49,7 +49,7 @@ end
 "  type token = %Token.token",
 "  ",
 "  exception SyntaxError of {parsing:string, msg:string list, found:token%{region:region}}",
-"  exception Expected of {expected:string, found:token, parsing:string option} ",
+"  exception Expected of {expected:string, found:token, parsing:string option%{region:region}} ",
 "	   (* token expected, nonterminal being parsed *)",
 "  ",
 if \g.attributes["arg-pat"] then {
@@ -79,7 +79,7 @@ else [
 "  exception TokenMismatch of string",
 "  fun expect (f, %tokenlex, nt) =",
 "    (f token%trgn, invoke lex) handle TokenMismatch t => ",
-"         raise Expected {expected=t, found=token, parsing=nt}",
+"         raise Expected {expected=t, found=token, parsing=nt%{region=trgn}}",
 "  ",
 "  fun synerror (t%trgn, nt, s) = raise SyntaxError {parsing=nt, found=t, msg=s%{region=trgn}}",
 "  ",
@@ -119,7 +119,7 @@ else [
 "  fun make_parser (f, unEOF) stream =",
 "    let val (result%rgn, (%tokenlex)) = f (invoke stream)",
 "    in  (unEOF token; result) handle TokenMismatch _ => ",
-"          raise Expected {expected=\"end of file\", found=token, parsing=NONE} ",
+"          raise Expected {expected=\"end of file\", found=token, parsing=NONE%{region=trgn}} ",
 "    end",
 "  ",
 ""]
@@ -193,6 +193,7 @@ write(outfile, "end")
 write(outfile, "structure ", token, " : ", mixcaps_to_allcaps(token), " = struct")
 emit_ml_tokendef(outfile, g)
 emit_ml_reserved(outfile, g)
+emit_ml_reserved_lex(outfile, g)
 write(outfile, "end")
 close(outfile)
 @ 
@@ -349,6 +350,36 @@ procedure emit_ml_reserved(outfile, g)
   }    
   write(outfile, nprefix, " _ = NONE")
   write(outfile)
+
+  return g
+end
+<<*>>=
+procedure mllex_escape(c)
+  local n
+  n := ord(c)
+  return if n >= 100 then "\\" || n else if n >= 10 then "\\0" || n else "\\00" || n
+end
+
+procedure emit_ml_reserved_lex(outfile, g)
+  write(outfile, "(* ML-Lex RULES BEGIN")
+  every t := !sort(MLReserved) do {
+    writes(outfile, "\"")
+    t[2:-1] ?
+        while not pos(0) do
+            if ="\\\\" then
+                writes(outfile, "\\\\")
+            else if ="\"" then
+                writes(outfile, "\\\"")
+            else {
+              c := move(1)
+              if ord(" ") <= ord(c) < 127 then
+                  writes(outfile, c)
+              else
+                  writes(outfile, mllex_escape(c))
+            }
+    write(outfile, "\" => ((T.", g.terms[t], ", yyrgn));")
+  }
+  write(outfile, "ML-Lex RULES END *)")
 
   return g
 end

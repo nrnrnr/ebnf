@@ -13,3 +13,12 @@ reserved word just by quoting it---EBNF takes care of the rest.
 The main advantage over something like parsing combinators is that
 EBNF computes first and follow sets, and given something like the
 `-picky` option, will error exit if it detects an ambiguity.
+
+
+Sample command
+--------------
+
+````
+BLKSIZE=4000000 STRSIZE=4000000 ./ebnf -slr grammar.gr > grammar.icn
+````
+

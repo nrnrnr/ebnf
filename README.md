@@ -15,6 +15,12 @@ EBNF computes first and follow sets, and given something like the
 `-picky` option, will error exit if it detects an ambiguity.
 
 
+Installation
+------------
+Requires Andrew Hume's `mk`; look for the plan9port version
+at https://swtch.com/plan9port/unix/.
+With luck it will build.
+
 Sample command
 --------------
 

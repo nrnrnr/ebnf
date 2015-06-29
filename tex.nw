@@ -1,0 +1,60 @@
+% -*- mode: Noweb; noweb-code-mode: icon-mode -*-
+<<*>>=
+procedure writetex(outfile, g, emitter)
+  local terms, pfx
+  terms := set()
+  pfx := ""
+  every insert(terms, key(g.terms))
+  every writes(outfile, pfx, "\\begin{production}{", lhs := !g.ntlist, "}\n    ") do {
+    case type(rhs := g.nonterms[lhs]) of {
+      "Opt" | "Clo" | "Cat" | "string" : 
+              { write(outfile, texpix(g, rhs)) }
+      "Alt" : { write(outfile, texpix(g, rhs, s := "\n  ")) }
+      default : error("impossible node type")
+    }
+    write(outfile, "\\end{production}")
+    pfx := "\\productionglue\n"
+  }
+  return g
+end
+<<*>>=
+procedure texpix(g, node, separator)
+  return case type(node) of {
+    "Opt" : "\\optional{" || texpix(g, node.node) || "}"
+    "Clo" : "\\sequence{" || texpix(g, node.node) || "}"
+    "Cat" : {
+       s := ""
+       every s ||:= texpix(g, !node.list, node) || " "
+       s[1:-1] | ""
+     }
+    "Alt" : {
+       s := ""
+       sep := if type(separator) == "string" then separator else " "
+       every s ||:= sep || "| " || texpix(g, !node.list)
+       s := s[*sep+3:0]
+       if type(separator) == "Cat" then "\\alternate{" || s || "}" else s
+     }
+    "string" : 
+       if node[1] == node[-1] == "\"" then
+         case node[2:-1] of {
+           "|" : "{\\litbar}"
+           "}" | "{" | "\\" : "\\lit{\\char`\\" || node[2:-1] || "}"
+           default : "\\lit{" || escapeTeX(node[2:-1]) || "}"
+         }
+       else
+         (if \g.terms[node] then "\\term" else "\\nt") || "{" || node || "}"
+    default  : error("impossible node type")
+  }
+end
+<<*>>=
+procedure escapeTeX(s)
+  static specials
+  initial specials := cset("\{}%#$^&~")
+  r := ""
+  s ? {
+    while r ||:= tab(upto(specials)) do
+      r ||:= "\\" || move(1)
+    return r || tab(0)
+  }
+end
+

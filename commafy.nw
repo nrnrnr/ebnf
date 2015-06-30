@@ -1,0 +1,22 @@
+Old utilities I had around.
+<<*>>=
+procedure commafy(l, andword)
+   local s, comma, and, i
+   if *l = 0 then return ""
+   /andword := "and"
+   comma := if *l > 2 then ", " else " "
+   and := if *l > 1 then andword || " " else ""
+   s := ""
+   every i := 1 to *l - 1 do s ||:= l[i] || comma
+   return s || and || l[*l]
+end   
+  
+procedure commaseparate(l, comma)
+  local s, i
+  if *l = 0 then return ""
+  /comma := ", "
+  s := ""
+  every i := 1 to *l - 1 do s ||:= l[i] || comma
+  return s || l[*l]
+end
+

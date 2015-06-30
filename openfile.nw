@@ -1,0 +1,15 @@
+Another old utility.
+<<*>>=
+procedure openfile(name, mode, path) 
+    /mode := "r"
+    /path := ["."]
+    if name == "-" then
+       case mode of {
+          "r" : return &input
+          "w" : return &output
+          default : stop("bogus file mode: ", mode)
+       }
+    else 
+      return open(if name[1] == "/" then name else !path || "/" || name, mode) | 
+         stop("Can't open file ", name, " for ", mode, "on path ", image(path))
+end

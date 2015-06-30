@@ -1,4 +1,4 @@
-SOURCE=`echo *[!t].nw`
+SOURCE=`echo *.nw`
 U1=`echo $SOURCE | sed 's/.nw/.u1/g'`
 ICN=`echo $SOURCE | sed 's/.nw/.icn/g'`
 

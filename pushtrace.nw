@@ -1,0 +1,19 @@
+Another utility
+<<*>>=
+################################################################
+
+global tracestack
+
+procedure pushtrace(tr)
+    initial tracestack := []
+    push(tracestack, &trace)
+    return &trace := 
+      case type(tr) of {
+        "string" : integer(getenv(tr)) | 0
+        default  : tr
+      }
+end
+
+procedure poptrace()
+    return &trace := pop(tracestack) 
+end

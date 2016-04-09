@@ -14,6 +14,9 @@ The main advantage over something like parsing combinators is that
 EBNF computes first and follow sets, and given something like the
 `-picky` option, will error exit if it detects an ambiguity.
 
+Licensing
+---------
+The software is open source under the BSD2 license.
 
 Installation
 ------------
